@@ -9,6 +9,7 @@ defmodule AshAuthentication.Strategy.MagicLink.Plug do
   alias Plug.Conn
   import Ash.PlugHelpers, only: [get_actor: 1, get_tenant: 1, get_context: 1]
   import AshAuthentication.Plug.Helpers, only: [store_authentication_result: 2]
+  require EEx
 
   @doc """
   Handle a request for a magic link.
@@ -32,13 +33,39 @@ defmodule AshAuthentication.Strategy.MagicLink.Plug do
   end
 
   @doc """
+  Present a sign in button to the user.
+  """
+  @spec accept(Conn.t(), MagicLink.t()) :: Conn.t()
+  # sobelow_skip ["XSS.SendResp"]
+  def accept(conn, strategy) do
+    subject_params = subject_params(conn, strategy)
+    param_name = to_string(strategy.token_param_name)
+    token = Map.get(conn.params, param_name, subject_params[param_name])
+
+    conn
+    |> Conn.put_resp_content_type("text/html")
+    |> Conn.send_resp(200, render_form(strategy: strategy, conn: conn, token: token))
+  end
+
+  EEx.function_from_file(:defp, :render_form, Path.join(__DIR__, "sign_in_form.html.eex"), [
+    :assigns
+  ])
+
+  @doc """
   Sign in via magic link.
   """
   @spec sign_in(Conn.t(), MagicLink.t()) :: Conn.t()
   def sign_in(conn, strategy) do
+    param_name =
+      strategy.resource
+      |> Info.authentication_subject_name!()
+      |> to_string()
+
     params =
-      conn.params
-      |> Map.take([to_string(strategy.token_param_name)])
+      case Map.fetch(conn.params, param_name) do
+        :error -> conn.params
+        {:ok, params} -> params
+      end
 
     opts = opts(conn)
     result = Strategy.action(strategy, :sign_in, params, opts)

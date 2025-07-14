@@ -68,6 +68,9 @@ defmodule AshAuthentication.Strategy.Password.Actions do
            }
          )}
 
+      {:error, error} when is_struct(error, Errors.AuthenticationFailed) ->
+        {:error, error}
+
       {:error, error} when is_exception(error) ->
         {:error,
          Errors.AuthenticationFailed.exception(
@@ -134,12 +137,13 @@ defmodule AshAuthentication.Strategy.Password.Actions do
     options =
       options
       |> Keyword.put_new_lazy(:domain, fn -> Info.domain!(strategy.resource) end)
+      |> Keyword.put_new(:skip_unknown_inputs, [:*])
 
     strategy.resource
     |> Query.new()
     |> Query.set_context(%{private: %{ash_authentication?: true}})
-    |> Query.for_read(strategy.sign_in_with_token_action_name, %{"token" => params["token"]})
-    |> Ash.read(options)
+    |> Query.for_read(strategy.sign_in_with_token_action_name, params, options)
+    |> Ash.read()
     |> case do
       {:ok, [user]} ->
         check_user(user, strategy)
@@ -192,6 +196,10 @@ defmodule AshAuthentication.Strategy.Password.Actions do
     })
     |> Changeset.for_create(strategy.register_action_name, params, options)
     |> Ash.create()
+    |> case do
+      {:ok, user} -> check_user(user, strategy)
+      other -> other
+    end
   end
 
   def register(strategy, _params, _options) when is_struct(strategy, Password) do
@@ -258,6 +266,7 @@ defmodule AshAuthentication.Strategy.Password.Actions do
         |> Ash.ActionInput.for_action(action_name, params, options)
         |> Ash.run_action()
         |> case do
+          :ok -> :ok
           {:ok, _} -> :ok
           {:error, reason} -> {:error, reason}
         end
@@ -279,7 +288,7 @@ defmodule AshAuthentication.Strategy.Password.Actions do
         options
       ) do
     with {:ok, token} <- Map.fetch(params, "reset_token"),
-         {:ok, %{"sub" => subject}, resource} <- Jwt.verify(token, strategy.resource),
+         {:ok, %{"sub" => subject}, resource} <- Jwt.verify(token, strategy.resource, options),
          {:ok, user} <- AshAuthentication.subject_to_user(subject, resource, options) do
       options =
         options
@@ -321,14 +330,14 @@ defmodule AshAuthentication.Strategy.Password.Actions do
     {:ok, user}
   end
 
-  defp check_user(user, %Password{require_confirmed_with: _value} = strategy) do
-    if is_nil(user.confirmed_at) do
+  defp check_user(user, %Password{require_confirmed_with: value} = strategy) do
+    if is_nil(Map.get(user, value)) do
       {:error,
        Errors.AuthenticationFailed.exception(
          strategy: strategy,
          caused_by: %Ash.Error.Forbidden{
            errors: [
-             %Errors.CannotConfirmUnconfirmedUser{}
+             %AshAuthentication.Errors.UnconfirmedUser{}
            ]
          }
        )}

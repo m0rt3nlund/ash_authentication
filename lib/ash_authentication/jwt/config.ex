@@ -48,6 +48,22 @@ defmodule AshAuthentication.Jwt.Config do
       &Joken.generate_jti/0,
       &validate_jti(&1, &2, &3, opts)
     )
+    |> maybe_add_tenant_claim(resource, opts[:tenant])
+  end
+
+  defp maybe_add_tenant_claim(cfg, resource, tenant) do
+    tenant = Ash.ToTenant.to_tenant(tenant, resource)
+
+    if Ash.Resource.Info.multitenancy_strategy(resource) do
+      Config.add_claim(
+        cfg,
+        "tenant",
+        fn -> tenant end,
+        &validate_tenant(&1, tenant)
+      )
+    else
+      cfg
+    end
   end
 
   @doc """
@@ -76,6 +92,12 @@ defmodule AshAuthentication.Jwt.Config do
   def generate_audience(vsn) do
     "~> #{vsn.major}.#{vsn.minor}"
   end
+
+  @doc """
+  Validate that the "tenant" claim matches the provided tenant option.
+  """
+  @spec validate_tenant(nil | String.t(), nil | String) :: boolean()
+  def validate_tenant(maybe_tenant, tenant), do: maybe_tenant == tenant
 
   @doc """
   The validation function used to validate the "aud" claim.
@@ -116,7 +138,7 @@ defmodule AshAuthentication.Jwt.Config do
   The signer used to sign the token on a per-resource basis.
   """
   @spec token_signer(Resource.t(), keyword) :: Signer.t()
-  def token_signer(resource, opts \\ []) do
+  def token_signer(resource, opts \\ [], context \\ %{}) do
     algorithm =
       Keyword.get_lazy(opts, :signing_algorithm, fn ->
         Info.authentication_tokens_signing_algorithm!(resource)
@@ -127,24 +149,23 @@ defmodule AshAuthentication.Jwt.Config do
            {:ok, {secret_module, secret_opts}} <-
              Info.authentication_tokens_signing_secret(resource),
            {:ok, secret} when is_binary(secret) <-
-             secret_module.secret_for(
+             AshAuthentication.Secret.secret_for(
+               secret_module,
                ~w[authentication tokens signing_secret]a,
                resource,
-               secret_opts
+               secret_opts,
+               context
              ) do
         secret
       else
         {:ok, secret} when is_binary(secret) ->
           secret
 
-        {:ok, secret} when not is_binary(secret) ->
-          raise "Invalid JWT signing secret: #{inspect(secret)}. Please see the documentation for `AshAuthentication.Jwt` for details"
-
-        secret when is_binary(secret) ->
+        {:ok, _secret} ->
           raise "Invalid JWT signing secret format: Make sure to return a success tuple like `{:ok, \"signing_secret\"}`." <>
                   " Please see the documentation for `AshAuthentication.Jwt` for details"
 
-        _ ->
+        :error ->
           raise "Missing JWT signing secret. Please see the documentation for `AshAuthentication.Jwt` for details"
       end
 

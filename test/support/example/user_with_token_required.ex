@@ -32,6 +32,12 @@ defmodule Example.UserWithTokenRequired do
       signing_secret &get_config/2
     end
 
+    add_ons do
+      log_out_everywhere do
+        apply_on_password_change?(true)
+      end
+    end
+
     strategies do
       password do
         identity_field :email
@@ -49,6 +55,16 @@ defmodule Example.UserWithTokenRequired do
 
   actions do
     defaults [:create, :read, :update, :destroy]
+
+    update :update_email_atomic do
+      require_atomic? true
+      accept [:email]
+    end
+
+    update :update_email_nonatomic do
+      require_atomic? false
+      accept [:email]
+    end
   end
 
   calculations do

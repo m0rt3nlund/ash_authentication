@@ -23,6 +23,7 @@ defmodule Example.UserWithRegisterMagicLink do
 
   authentication do
     select_for_senders([:email])
+    session_identifier(:jti)
 
     tokens do
       enabled? true
@@ -35,6 +36,7 @@ defmodule Example.UserWithRegisterMagicLink do
       magic_link do
         identity_field :email
         registration_enabled? true
+        require_interaction? true
 
         sender fn user, token, _opts ->
           email =
@@ -55,8 +57,7 @@ defmodule Example.UserWithRegisterMagicLink do
         inhibit_updates? false
         confirm_on_create? true
         confirm_on_update? true
-        # in a real setup, you should have this
-        # but we don't for testing purposes
+        require_interaction? true
         auto_confirm_actions [:sign_in_with_magic_link]
 
         sender fn user, _, _ ->

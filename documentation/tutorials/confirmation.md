@@ -97,6 +97,7 @@ defmodule MyApp.Accounts.User do
         monitor_fields [:email]
         confirm_on_create? true
         confirm_on_update? false
+        require_interaction? true
         sender MyApp.Accounts.User.Senders.SendNewUserConfirmationEmail
       end
     end
@@ -124,7 +125,7 @@ defmodule MyApp.Accounts.User.Senders.SendNewUserConfirmationEmail do
   def send(user, token, _opts) do
     MyApp.Accounts.Emails.deliver_email_confirmation_instructions(
       user,
-      url(~p"/auth/user/confirm_new_user?#{[confirm: token]}")
+      url(~p"/confirm_new_user/#{token}")
     )
   end
 end
@@ -185,22 +186,47 @@ Provided you have your authentication routes hooked up either via `AshAuthentica
 
 ## Blocking unconfirmed users from logging in
 
-The above section explains how to confirm an user account. There's a new directive in the [dsl](https://hexdocs.pm/ash_authentication/dsl-ashauthentication-strategy-password.html#authentication-strategies-password-require_confirmed_with) which can require the user to be confirmed in order to log in.
+The previous section explained how to confirm a user account. AshAuthentication now includes a directive in the [DSL](https://hexdocs.pm/ash_authentication/dsl-ashauthentication-strategy-password.html#authentication-strategies-password-require_confirmed_with) that allows you to require account confirmation before a user can log in.
 
-So:
+This can be a nice layer of protection to lock down your application, but consider
+instead allowing unconfirmed users to use your application in a partial state.
+This is often a better UX. This would involve adding a plug to your router,
+for example, that redirects users to a home page that requests that they confirm
+their account. Alternatively, you can just leverage their confirmation status
+to allow or disallow certain actions.
+
+> #### Must add error handling {: .warning}
+>
+> Your AuthController will begin getting a new error in the failure callback:
+> `AshAuthentication.Errors.UnconfirmedUser` when this setting is enabled.. You'll need to handle this to show a new flash message.
+
+For example:
 
 ```
-strategies do
-  strategy :password do
-    ...
-    require_confirmed_with :confirmed_at
+authentication do
+  ...
+  add_ons do
+    confirmation :confirm_new_user do
+      ...
+      confirmed_at_field :confirmed_at
+    end
+  end
+
+  strategies do
+    strategy :password do
+      ...
+      # Require confirmation using the specified field
+      require_confirmed_with :confirmed_at
+    end
   end
 end
 ```
 
-this will make impossible for unconfirmed users to log in. Note that at the moment it is developer responsibility to handle the scenario, for example redirecting the user to a page that gives some context and maybe offers the chance to require a new confirmation email in case the previous one is lost.
+With this configuration, users whose `confirmed_at` field is `nil` will not be able to log in.
 
-If the field value is `nil` or if the field itself is not present, no confirmation check will be enforced.
+*Note:* It is currently the developer’s responsibility to handle this scenario - for example, by redirecting the user to a page that explains the situation and possibly offers an option to request a new confirmation email if the original one was lost.
+
+If `require_confirmed_with` is not set or set to `nil`, no confirmation check is enforced - unconfirmed users will be allowed to log in.
 
 ## Confirming changes to monitored fields
 
@@ -221,6 +247,7 @@ defmodule MyApp.Accounts.User do
         confirm_on_create? false
         confirm_on_update? true
         confirm_action_name :confirm_change
+        require_interaction? true
         sender MyApp.Accounts.User.Senders.SendEmailChangeConfirmationEmail
       end
     end

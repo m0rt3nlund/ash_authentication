@@ -42,9 +42,12 @@ configuration options should you need them.
 
 The following defaults are applied:
 
-* `:base_url` is set to `"https://accounts.google.com/"`.
-* `:authorization_params` is set to `[scope: "email profile"]`.
-* `:client_authentication_method` is set to `"client_secret_post"`.
+* `:base_url` is set to `"https://www.googleapis.com"`.
+* `:authorize_url` is set to `"https://accounts.google.com/o/oauth2/v2/auth"`.
+* `:token_url` is set to `"/oauth2/v4/token"`.
+* `:user_url` is set to `"/oauth2/v3/userinfo"`.
+* `:authorization_params` is set to `[scope: "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"]`.
+* `:auth_method` is set to `:client_secret_post`.
 
 
 
@@ -74,7 +77,7 @@ The following defaults are applied:
 | [`user_url`](#authentication-strategies-google-user_url){: #authentication-strategies-google-user_url } | `(any, any -> any) \| module \| String.t` | `"/oauth2/v3/userinfo"` | The API url to access the user endpoint, relative to `site`, e.g `user_url fn _, _ -> {:ok, "https://example.com/userinfo"} end`. Takes either a module which implements the `AshAuthentication.Secret` behaviour, a 2 arity anonymous function or a string. |
 | [`private_key`](#authentication-strategies-google-private_key){: #authentication-strategies-google-private_key } | `(any, any -> any) \| module \| String.t` |  | The private key to use if `:auth_method` is `:private_key_jwt`. Takes either a module which implements the `AshAuthentication.Secret` behaviour, a 2 arity anonymous function or a string. |
 | [`code_verifier`](#authentication-strategies-google-code_verifier){: #authentication-strategies-google-code_verifier } | `boolean` | `false` | Boolean to generate and use a random 128 byte long url safe code verifier for PKCE flow, optional, defaults to false. When set to true the session params will contain :code_verifier, :code_challenge, and :code_challenge_method params |
-| [`authorization_params`](#authentication-strategies-google-authorization_params){: #authentication-strategies-google-authorization_params } | `keyword` | `[scope: "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"]` | Any additional parameters to encode in the request phase. eg: `authorization_params scope: "openid profile email"` |
+| [`authorization_params`](#authentication-strategies-google-authorization_params){: #authentication-strategies-google-authorization_params } | `(any, any -> any) \| module \| keyword \| nil` | `[scope: "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"]` | Any additional parameters to encode in the request phase. eg: `authorization_params scope: "openid profile email"` |
 | [`registration_enabled?`](#authentication-strategies-google-registration_enabled?){: #authentication-strategies-google-registration_enabled? } | `boolean` | `true` | If enabled, new users will be able to register for your site when authenticating and not already present. If not, only existing users will be able to authenticate. |
 | [`register_action_name`](#authentication-strategies-google-register_action_name){: #authentication-strategies-google-register_action_name } | `atom` |  | The name of the action to use to register a user, if `registration_enabled?` is `true`. Defaults to `register_with_<name>` See the "Registration and Sign-in" section of the strategy docs for more. |
 | [`sign_in_action_name`](#authentication-strategies-google-sign_in_action_name){: #authentication-strategies-google-sign_in_action_name } | `atom` |  | The name of the action to use to sign in an existing user, if `sign_in_enabled?` is `true`. Defaults to `sign_in_with_<strategy>`, which is generated for you by default. See the "Registration and Sign-in" section of the strategy docs for more information. |

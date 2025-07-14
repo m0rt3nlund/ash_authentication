@@ -69,6 +69,23 @@ defmodule AshAuthentication.AddOn.Confirmation do
       ...> user.confirmed_at >= one_second_ago()
       true
 
+  ## Usage with AshAuthenticationPhoenix
+
+  If you are using `AshAuthenticationPhoenix`, and have `require_interaction?` set to `true`,
+  which you very much should, then you will need to add a `confirm_route` to your router. This
+  is placed in the same location as `auth_routes`, and should be provided the user and the
+  strategy name. For example:
+
+  ```elixir
+  # Remove this if you do not want to use the confirmation strategy
+  confirm_route(
+    MyApp.Accounts.User,
+    :confirm_new_user,
+    auth_routes_prefix: "/auth",
+    overrides: [MyApp.AuthOverrides, AshAuthentication.Phoenix.Overrides.Default]
+  )
+  ```
+
   ## Plugs
 
   Confirmation provides a single endpoint for the `:confirm` phase.  If you wish
@@ -90,6 +107,7 @@ defmodule AshAuthentication.AddOn.Confirmation do
             confirm_on_update?: true,
             prevent_hijacking?: true,
             confirmed_at_field: :confirmed_at,
+            require_interaction?: false,
             inhibit_updates?: true,
             monitor_fields: [],
             auto_confirm_actions: [],
@@ -97,7 +115,6 @@ defmodule AshAuthentication.AddOn.Confirmation do
             provider: :confirmation,
             resource: nil,
             sender: nil,
-            strategy_module: __MODULE__,
             token_lifetime: nil
 
   alias Ash.{Changeset, Resource}
@@ -118,7 +135,6 @@ defmodule AshAuthentication.AddOn.Confirmation do
           provider: :confirmation,
           resource: module,
           sender: nil | {module, keyword},
-          strategy_module: module,
           token_lifetime: hours :: pos_integer
         }
 
@@ -131,14 +147,23 @@ defmodule AshAuthentication.AddOn.Confirmation do
   This will generate a token with the `"act"` claim set to the confirmation
   action for the strategy, and the `"chg"` claim will contain any changes.
   """
-  @spec confirmation_token(Confirmation.t(), Changeset.t(), Resource.record()) ::
+  @spec confirmation_token(
+          Confirmation.t(),
+          Changeset.t(),
+          Resource.record(),
+          opts :: Keyword.t()
+        ) ::
           {:ok, String.t()} | :error | {:error, any}
-  def confirmation_token(strategy, changeset, user) do
+  def confirmation_token(strategy, changeset, user, opts \\ []) do
     claims = %{"act" => strategy.confirm_action_name}
 
     with {:ok, token, _claims} <-
-           Jwt.token_for_user(user, claims, token_lifetime: strategy.token_lifetime),
-         :ok <- Confirmation.Actions.store_changes(strategy, token, changeset) do
+           Jwt.token_for_user(
+             user,
+             claims,
+             Keyword.merge(opts, token_lifetime: strategy.token_lifetime)
+           ),
+         :ok <- Confirmation.Actions.store_changes(strategy, token, changeset, opts) do
       {:ok, token}
     end
   end

@@ -55,19 +55,19 @@ Because all the configuration values should be kept secret (ie the `client_secre
 defmodule MyApp.Secrets do
   use AshAuthentication.Secret
 
-  def secret_for([:authentication, :strategies, :auth0, :client_id], MyApp.Accounts.User, _) do
+  def secret_for([:authentication, :strategies, :auth0, :client_id], MyApp.Accounts.User, _opts, _meth) do
     get_config(:client_id)
   end
 
-  def secret_for([:authentication, :strategies, :auth0, :redirect_uri], MyApp.Accounts.User, _) do
+  def secret_for([:authentication, :strategies, :auth0, :redirect_uri], MyApp.Accounts.User, _opts, _meth) do
     get_config(:redirect_uri)
   end
 
-  def secret_for([:authentication, :strategies, :auth0, :client_secret], MyApp.Accounts.User, _) do
+  def secret_for([:authentication, :strategies, :auth0, :client_secret], MyApp.Accounts.User, _opts, _meth) do
     get_config(:client_secret)
   end
 
-  def secret_for([:authentication, :strategies, :auth0, :base_url], MyApp.Accounts.User, _) do
+  def secret_for([:authentication, :strategies, :auth0, :base_url], MyApp.Accounts.User, _opts, _meth) do
     get_config(:base_url)
   end
 
@@ -127,3 +127,47 @@ defmodule MyApp.Accounts.User do
 
 end
 ```
+
+If you are only setting up this strategy it's possible that you don't have the `email` field in your `User` resource, so you will need to add it:
+
+```
+defmodule MyApp.Accounts.User do
+
+  # ...
+
+  attributes do
+    uuid_primary_key :id
+
+    attribute :email, :ci_string do
+      allow_nil? false
+    end
+  end
+
+  identities do
+    identity :unique_email, [:email]
+  end
+
+  # ...
+
+end
+```
+
+And the generate & run the migrations with:
+
+```
+mix ash_postgres.generate_migrations
+mix ecto.migrate
+```
+
+In your auth controller, make sure to add a redirect to `https://[auth0_endpoint]/v2/logout` when logging out. This notifies Auth0 that the user has logged out. Be sure to replace `[auth0_endpoint]` and `[auth0_client_id]` with your actual Auth0 values:
+
+```elixir
+  def sign_out(conn, _params) do
+
+    conn
+    |> clear_session(:my_app)
+    |> redirect(external: "https://[auth0_endpoint]/v2/logout?client_id=[auth0_client_id]&returnTo=#{AppWeb.Endpoint.url()}")
+  end
+```
+
+All good! Go to http://localhost:4000/sign-in to see it working.

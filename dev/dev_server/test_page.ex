@@ -23,7 +23,10 @@ defmodule DevServer.TestPage do
     resources =
       :ash_authentication
       |> AshAuthentication.authenticated_resources()
-      |> Enum.map(&{&1, Info.authentication_options(&1), Info.authentication_strategies(&1)})
+      |> Enum.map(
+        &{&1, Info.authentication_options(&1),
+         Info.authentication_strategies(&1) ++ Info.authentication_add_ons(&1)}
+      )
 
     current_users =
       conn.assigns
@@ -145,12 +148,12 @@ defmodule DevServer.TestPage do
        do: ""
 
   defp render_strategy(strategy, phase, options)
-       when strategy.provider == :confirmation and phase == :confirm do
+       when strategy.provider == :confirmation and phase == :accept do
     EEx.eval_string(
       ~s"""
       <form method="<%= @method %>" action="<%= @route %>">
         <fieldset>
-          <legend><%= @strategy.name %></legend>
+        <legend><%= @strategy.name %> <%= @phase %></legend>
           <input type="text" name="confirm" placeholder="confirmation token" />
           <br />
           <input type="submit" value="Confirm" />
@@ -160,6 +163,30 @@ defmodule DevServer.TestPage do
       assigns: [
         strategy: strategy,
         route: route_for_phase(strategy, phase),
+        phase: phase,
+        options: options,
+        method: Strategy.method_for_phase(strategy, phase)
+      ]
+    )
+  end
+
+  defp render_strategy(strategy, phase, options)
+       when strategy.provider == :confirmation and phase == :confirm do
+    EEx.eval_string(
+      ~s"""
+      <form method="<%= @method %>" action="<%= @route %>">
+        <fieldset>
+          <legend><%= @strategy.name %> <%= @phase %></legend>
+          <input type="text" name="confirm" placeholder="confirmation token" />
+          <br />
+          <input type="submit" value="Confirm" />
+        </fieldset>
+      </form>
+      """,
+      assigns: [
+        strategy: strategy,
+        route: route_for_phase(strategy, phase),
+        phase: phase,
         options: options,
         method: Strategy.method_for_phase(strategy, phase)
       ]
@@ -182,7 +209,8 @@ defmodule DevServer.TestPage do
   defp render_strategy(strategy, :callback, _) when strategy.provider in [:oauth2, :oidc], do: ""
 
   defp render_strategy(strategy, :sign_in, _options)
-       when is_struct(strategy, Example.OnlyMartiesAtTheParty) do
+       when is_struct(strategy, Example.OnlyMartiesAtTheParty) or
+              is_struct(strategy, ExampleMultiTenant.OnlyMartiesAtTheParty) do
     EEx.eval_string(
       ~s"""
       <form method="<%= @method %>" action="<%= @route %>">
@@ -219,6 +247,27 @@ defmodule DevServer.TestPage do
         strategy: strategy,
         route: route_for_phase(strategy, phase),
         options: options,
+        method: Strategy.method_for_phase(strategy, phase)
+      ]
+    )
+  end
+
+  defp render_strategy(strategy, phase, _options)
+       when is_struct(strategy, Strategy.MagicLink) and phase == :accept do
+    EEx.eval_string(
+      ~s"""
+      <form method="<%= @method %>" action="<%= @route %>">
+      <fieldset>
+        <legend><%= @strategy.name %> accept</legend>
+        <input type="text" name="token" placeholder="token" />
+        <br />
+        <input type="submit" value="Accept" />
+      </fieldset>
+      </form>
+      """,
+      assigns: [
+        strategy: strategy,
+        route: route_for_phase(strategy, phase),
         method: Strategy.method_for_phase(strategy, phase)
       ]
     )

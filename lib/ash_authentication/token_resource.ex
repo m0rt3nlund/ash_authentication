@@ -14,6 +14,11 @@ defmodule AshAuthentication.TokenResource do
           The Ash domain to use to access this resource.
           """
         ],
+        created_at_attribute_name: [
+          type: :atom,
+          doc: "The name of the `created_at` attribute on this resource.",
+          default: :created_at
+        ],
         expunge_expired_action_name: [
           type: :atom,
           doc: """
@@ -56,6 +61,20 @@ defmodule AshAuthentication.TokenResource do
               The name of the action used to revoke tokens.
               """,
               default: :revoke_token
+            ],
+            revoke_jti_action_name: [
+              type: :atom,
+              doc: """
+              The name of the action used to revoke jtis.
+              """,
+              default: :revoke_jti
+            ],
+            revoke_all_stored_for_subject_action_name: [
+              type: :atom,
+              doc: """
+              The name of the action used to revoke all stored tokens for a given subject.
+              """,
+              default: :revoke_all_stored_for_subject
             ],
             is_revoked_action_name: [
               type: :atom,
@@ -145,7 +164,8 @@ defmodule AshAuthentication.TokenResource do
 
   use Spark.Dsl.Extension,
     sections: @dsl,
-    transformers: [TokenResource.Transformer, TokenResource.Verifier]
+    transformers: [TokenResource.Transformer],
+    verifiers: [TokenResource.Verifier]
 
   @doc """
   Has the token been revoked?

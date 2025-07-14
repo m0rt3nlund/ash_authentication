@@ -19,7 +19,30 @@ defmodule AshAuthentication.Verifier do
   def verify(dsl_state) do
     with {:ok, _domain} <- validate_domain_presence(dsl_state),
          :ok <- validate_tokens_may_be_required(dsl_state) do
-      validate_token_resource(dsl_state)
+      if Info.authentication_tokens_enabled?(dsl_state) and
+           Info.authentication_session_identifier!(dsl_state) == :error and
+           not Info.authentication_tokens_require_token_presence_for_authentication?(dsl_state) do
+        {:error,
+         DslError.exception(
+           path: [:authentication, :session_identifier],
+           message: """
+           Must set `authentication.session_identifier` to either `:jti` or `:unsafe`,
+           unless `authentication.tokens.require_token_presence_for_authentication?` is set to `true`.
+
+           If you are seeing this error while upgrading ash_authentication, be aware that
+           updating this setting will log out all of your users.
+
+           When set to `:unsafe`, tokens are not revoked when the user logs out.
+           When set to `:jti`, we use this information to revoke tokens on logout.
+
+           We suggest setting `authentication.tokens.require_token_presence_for_authentication?` to `true`
+           to ensure that tokens are always present during authentication, which makes this option unnecessary.
+           Changing either of these settings will log out all of your users.
+           """
+         )}
+      else
+        validate_token_resource(dsl_state)
+      end
     end
   end
 
@@ -70,12 +93,11 @@ defmodule AshAuthentication.Verifier do
          DslError.exception(
            path: [:authentication, :tokens, :enabled?],
            message: """
-           The `#{password.name}` password authentication strategy requires tokens be enabled because reset tokens are in use.
+            The `#{password.name}` password authentication strategy requires tokens be enabled because reset tokens are in use.
 
-           To fix this error you can either:
+            To fix this error you can either:
 
-             1. disable password resets by removing the `resettable` configuration from your password strategy, or
-             2. enable tokens.
+              1. disable password resets by removing the `resettable` configuration from your password strategy, or
            """
          )}
 
@@ -89,7 +111,7 @@ defmodule AshAuthentication.Verifier do
 
            To fix this error you can either:
 
-             1. disable sign in tokens by setting `sign_in_tokens? false` your password strategy, or
+             1. disable sign in tokens by setting `sign_in_tokens_enabled? false` your password strategy, or
              2. enable tokens.
            """
          )}

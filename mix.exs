@@ -6,7 +6,7 @@ defmodule AshAuthentication.MixProject do
   Authentication extension for the Ash Framework.
   """
 
-  @version "4.4.5"
+  @version "4.9.6"
 
   def project do
     [
@@ -43,7 +43,8 @@ defmodule AshAuthentication.MixProject do
         "Phoenix Support" => "https://github.com/team-alembic/ash_authentication_phoenix"
       },
       source_url: "https://github.com/team-alembic/ash_authentication",
-      files: ~w[lib .formatter.exs mix.exs README* LICENSE* CHANGELOG* documentation]
+      files:
+        ~w[lib .formatter.exs mix.exs README* LICENSE* CHANGELOG* documentation usage-rules.md]
     ]
   end
 
@@ -55,9 +56,9 @@ defmodule AshAuthentication.MixProject do
     ]
   end
 
-  defp extra_applications(:dev), do: [:logger, :bcrypt_elixir]
-  defp extra_applications(:test), do: [:logger, :bcrypt_elixir]
-  defp extra_applications(_), do: [:logger]
+  defp extra_applications(:dev), do: [:logger, :bcrypt_elixir, :crypto]
+  defp extra_applications(:test), do: [:logger, :bcrypt_elixir, :crypto]
+  defp extra_applications(_), do: [:logger, :crypto]
 
   defp docs do
     [
@@ -72,6 +73,10 @@ defmodule AshAuthentication.MixProject do
          search_data: Spark.Docs.search_data_for(AshAuthentication)},
         {"documentation/dsls/DSL-AshAuthentication.AddOn.Confirmation.md",
          search_data: Spark.Docs.search_data_for(AshAuthentication.AddOn.Confirmation)},
+        {"documentation/dsls/DSL-AshAuthentication.AddOn.LogOutEverywhere.md",
+         search_data: Spark.Docs.search_data_for(AshAuthentication.AddOn.LogOutEverywhere)},
+        {"documentation/dsls/DSL-AshAuthentication.Strategy.ApiKey.md",
+         search_data: Spark.Docs.search_data_for(AshAuthentication.Strategy.ApiKey)},
         {"documentation/dsls/DSL-AshAuthentication.Strategy.Apple.md",
          search_data: Spark.Docs.search_data_for(AshAuthentication.Strategy.Apple)},
         {"documentation/dsls/DSL-AshAuthentication.Strategy.Auth0.md",
@@ -99,6 +104,7 @@ defmodule AshAuthentication.MixProject do
         "documentation/topics/testing.md",
         "documentation/topics/tokens.md",
         "documentation/topics/upgrading.md",
+        {"documentation/tutorials/api-keys.md", title: "API Keys"},
         "documentation/tutorials/auth0.md",
         "documentation/tutorials/confirmation.md",
         "documentation/tutorials/get-started.md",
@@ -152,6 +158,7 @@ defmodule AshAuthentication.MixProject do
         Strategies: [
           AshAuthentication.Strategy,
           AshAuthentication.AddOn.Confirmation,
+          AshAuthentication.AddOn.LogOutEverywhere,
           AshAuthentication.Strategy.Apple,
           AshAuthentication.Strategy.Auth0,
           AshAuthentication.Strategy.Custom,
@@ -205,8 +212,9 @@ defmodule AshAuthentication.MixProject do
     [
       {:ash, ash_version("~> 3.0 and >= 3.4.29")},
       {:igniter, "~> 0.4", optional: true},
-      {:assent, "~> 0.3.0"},
+      {:assent, "~> 0.2.13"},
       {:bcrypt_elixir, "~> 3.0"},
+      {:argon2_elixir, "~> 4.0", optional: true},
       {:castore, "~> 1.0"},
       {:finch, "~> 0.19"},
       {:jason, "~> 1.4"},
@@ -214,10 +222,11 @@ defmodule AshAuthentication.MixProject do
       {:plug, "~> 1.13"},
       {:spark, "~> 2.0"},
       {:splode, "~> 0.2"},
+      {:simple_sat, "~> 0.1", only: [:dev, :test]},
       {:absinthe_plug, "~> 1.5", only: [:dev, :test]},
-      {:ash_graphql, "~> 1.5.0", only: [:dev, :test]},
+      {:ash_graphql, "~> 1.7.2", only: [:dev, :test]},
       {:ash_json_api, "~> 1.4.6", only: [:dev, :test]},
-      {:ash_postgres, "~> 2.0", optional: true},
+      {:ash_postgres, "~> 2.6 and >= 2.6.8", optional: true},
       {:credo, "~> 1.6", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.2", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.18", only: [:dev, :test]},
@@ -236,6 +245,8 @@ defmodule AshAuthentication.MixProject do
     extensions = [
       "AshAuthentication",
       "AshAuthentication.AddOn.Confirmation",
+      "AshAuthentication.AddOn.LogOutEverywhere",
+      "AshAuthentication.Strategy.ApiKey",
       "AshAuthentication.Strategy.Apple",
       "AshAuthentication.Strategy.Auth0",
       "AshAuthentication.Strategy.Github",

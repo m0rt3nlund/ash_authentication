@@ -22,7 +22,7 @@ defmodule AshAuthentication.AddOn.Confirmation.Actions do
   @spec confirm(Confirmation.t(), map, keyword) :: {:ok, Resource.record()} | {:error, any}
   def confirm(strategy, params, opts \\ []) do
     with {:ok, token} <- Map.fetch(params, "confirm"),
-         {:ok, %{"sub" => subject}, _} <- Jwt.verify(token, strategy.resource),
+         {:ok, %{"sub" => subject}, _} <- Jwt.verify(token, strategy.resource, opts),
          {:ok, user} <- AshAuthentication.subject_to_user(subject, strategy.resource, opts),
          {:ok, token_resource} <- Info.authentication_tokens_token_resource(strategy.resource) do
       opts =
@@ -38,14 +38,14 @@ defmodule AshAuthentication.AddOn.Confirmation.Actions do
           ash_authentication?: true
         }
       })
-      |> Changeset.for_update(strategy.confirm_action_name, params)
+      |> Changeset.for_update(strategy.confirm_action_name, params, opts)
       |> Changeset.after_action(fn _changeset, record ->
-        case TokenResource.revoke(token_resource, token) do
+        case TokenResource.revoke(token_resource, token, opts) do
           :ok -> {:ok, record}
           {:error, reason} -> {:error, reason}
         end
       end)
-      |> Ash.update(opts)
+      |> Ash.update()
     else
       :error -> {:error, InvalidToken.exception(type: :confirmation)}
       {:error, reason} -> {:error, reason}
@@ -85,12 +85,16 @@ defmodule AshAuthentication.AddOn.Confirmation.Actions do
                ash_authentication?: true
              }
            })
-           |> Changeset.for_create(store_changes_action, %{
-             token: token,
-             extra_data: changes,
-             purpose: to_string(Strategy.name(strategy))
-           })
-           |> Ash.create(opts) do
+           |> Changeset.for_create(
+             store_changes_action,
+             %{
+               token: token,
+               extra_data: changes,
+               purpose: to_string(Strategy.name(strategy))
+             },
+             opts
+           )
+           |> Ash.create() do
       :ok
     else
       {:error, reason} ->

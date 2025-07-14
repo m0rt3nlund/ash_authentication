@@ -72,6 +72,12 @@ defmodule AshAuthentication.Dsl do
             doc:
               "The subject name is used anywhere that a short version of your resource name is needed.  Must be unique system-wide and will be inferred from the resource name by default (ie `MyApp.Accounts.User` -> `user`)."
           ],
+          session_identifier: [
+            type: {:in, [:error, :jti, :unsafe]},
+            default: :error,
+            doc:
+              "How to uniquely identify a session. Only necessary if  `require_token_presence_for_authentication?` is not set to `true`. Should always be `:jti`, if set."
+          ],
           domain: [
             type: {:behaviour, Domain},
             required: false,
@@ -153,6 +159,12 @@ defmodule AshAuthentication.Dsl do
           %Section{
             name: :add_ons,
             describe: "Additional add-ons related to, but not providing authentication",
+            entities: [],
+            patchable?: true
+          },
+          %Section{
+            name: :providers,
+            describe: "A DSL section for extensions to add authentication providers",
             entities: [],
             patchable?: true
           }

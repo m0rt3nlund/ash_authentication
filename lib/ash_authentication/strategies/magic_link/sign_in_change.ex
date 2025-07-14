@@ -10,18 +10,17 @@ defmodule AshAuthentication.Strategy.MagicLink.SignInChange do
   @doc false
   @impl true
   @spec change(Changeset.t(), keyword, Change.Context.t()) :: Changeset.t()
-  def change(changeset, _otps, _context) do
+  def change(changeset, opts, context) do
     subject_name =
       changeset.resource
       |> Info.authentication_subject_name!()
       |> to_string()
 
-    strategy = Info.strategy_for_action!(changeset.resource, changeset.action.name)
-
-    with token when is_binary(token) <-
+    with {:ok, strategy} <- Info.find_strategy(changeset, context, opts),
+         token when is_binary(token) <-
            Changeset.get_argument(changeset, strategy.token_param_name),
          {:ok, %{"act" => token_action, "sub" => subject, "identity" => identity}, _} <-
-           Jwt.verify(token, changeset.resource),
+           Jwt.verify(token, changeset.resource, [], context),
          ^token_action <- to_string(strategy.sign_in_action_name),
          %URI{path: ^subject_name} <- URI.parse(subject) do
       changeset
@@ -33,7 +32,7 @@ defmodule AshAuthentication.Strategy.MagicLink.SignInChange do
             :ok = TokenResource.revoke(token_resource, token)
           end
 
-          {:ok, token, _claims} = Jwt.token_for_user(record)
+          {:ok, token, _claims} = Jwt.token_for_user(record, %{}, Ash.Context.to_opts(context))
           {:ok, Resource.put_metadata(record, :token, token)}
 
         _changeset, {:error, error} ->
@@ -41,13 +40,22 @@ defmodule AshAuthentication.Strategy.MagicLink.SignInChange do
       end)
     else
       _ ->
-        Ash.Changeset.add_error(
-          changeset,
-          InvalidToken.exception(
-            field: strategy.token_param_name,
-            type: :magic_link
-          )
-        )
+        case Info.find_strategy(changeset, context, opts) do
+          {:ok, strategy} ->
+            Ash.Changeset.add_error(
+              changeset,
+              InvalidToken.exception(
+                field: strategy.token_param_name,
+                type: :magic_link
+              )
+            )
+
+          _ ->
+            Ash.Changeset.add_error(
+              changeset,
+              "No strategy in context, and no strategy found for action #{inspect(changeset.resource)}.#{changeset.action.name}"
+            )
+        end
     end
   end
 end

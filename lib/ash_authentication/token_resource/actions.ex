@@ -3,10 +3,12 @@ defmodule AshAuthentication.TokenResource.Actions do
   The code interface for interacting with the token resource.
   """
 
-  alias Ash.{Changeset, DataLayer, Notifier, Query, Resource}
+  alias Ash.{Changeset, Query, Resource}
   alias AshAuthentication.{TokenResource, TokenResource.Info}
 
   import AshAuthentication.Utils
+
+  require Logger
 
   @doc false
   @spec read_expired(Resource.t(), keyword) :: {:ok, [Resource.record()]} | {:error, any}
@@ -33,30 +35,45 @@ defmodule AshAuthentication.TokenResource.Actions do
   def expunge_expired(resource, opts \\ []) do
     expunge_expired_action_name = Info.token_expunge_expired_action_name!(resource)
 
-    resource
-    |> DataLayer.transaction(
-      fn -> expunge_inside_transaction(resource, expunge_expired_action_name, opts) end,
-      nil,
-      %{
-        type: :bulk_destroy,
-        metadata: %{
-          metadata: %{
-            resource: resource,
-            action: expunge_expired_action_name
-          }
-        }
-      }
-    )
-    |> case do
-      {:ok, {:ok, notifications}} ->
-        Notifier.notify(notifications)
-        :ok
+    with :ok <- assert_resource_has_extension(resource, TokenResource),
+         {:ok, read_expired_action_name} <- Info.token_read_expired_action_name(resource) do
+      opts =
+        opts
+        |> Keyword.put_new_lazy(:domain, fn -> Info.token_domain!(resource) end)
 
-      {:ok, {:error, reason}} ->
-        {:error, reason}
+      authorize_with =
+        if Ash.DataLayer.data_layer_can?(resource, :expr_error) do
+          :error
+        else
+          :filter
+        end
 
-      {:error, reason} ->
-        {:error, reason}
+      resource
+      |> Query.new()
+      |> Query.set_context(%{private: %{ash_authentication?: true}})
+      |> Query.for_read(read_expired_action_name, %{}, opts)
+      |> Ash.bulk_destroy(
+        expunge_expired_action_name,
+        %{},
+        opts
+        |> Keyword.update(
+          :context,
+          %{private: %{ash_authentication?: true}},
+          &Ash.Helpers.deep_merge_maps(&1, %{private: %{ash_authentication?: true}})
+        )
+        |> Keyword.merge(
+          strategy: [:atomic, :atomic_batches, :stream],
+          return_errors?: true,
+          notify?: true,
+          return_records?: false,
+          return_notifications?: false,
+          authorize_with: authorize_with
+        )
+      )
+      |> case do
+        %{status: :success} -> :ok
+        %{errors: errors} -> {:error, Ash.Error.to_class(errors)}
+      end
     end
   end
 
@@ -81,10 +98,25 @@ defmodule AshAuthentication.TokenResource.Actions do
             %{"token" => token},
             Keyword.put(opts, :domain, domain)
           )
+          |> Ash.ActionInput.set_context(%{
+            private: %{
+              ash_authentication?: true
+            }
+          })
           |> Ash.run_action()
           |> case do
-            {:ok, value} -> value
-            _ -> false
+            {:ok, value} ->
+              value
+
+            {:error, error} ->
+              Logger.error("""
+              Error while checking if token is revoked.
+              We must assume that it is revoked for security purposes.
+
+              #{Exception.format(:error, error)}
+              """)
+
+              true
           end
 
         :read ->
@@ -102,9 +134,21 @@ defmodule AshAuthentication.TokenResource.Actions do
           )
           |> Ash.read()
           |> case do
-            {:ok, []} -> false
-            {:ok, _} -> true
-            _ -> false
+            {:ok, []} ->
+              false
+
+            {:ok, _} ->
+              true
+
+            {:error, error} ->
+              Logger.error("""
+              Error while checking if token is revoked.
+              We must assume that it is revoked for security purposes.
+
+              #{Exception.format(:error, error)}
+              """)
+
+              true
           end
       end
     end
@@ -129,12 +173,34 @@ defmodule AshAuthentication.TokenResource.Actions do
           |> Ash.ActionInput.for_action(
             is_revoked_action_name,
             %{"jti" => jti},
-            Keyword.put(opts, :domain, domain)
+            Keyword.take(Keyword.put(opts, :domain, domain), [
+              :actor,
+              :authorize?,
+              :context,
+              :tenant,
+              :tracer,
+              :domain
+            ])
           )
+          |> Ash.ActionInput.set_context(%{
+            private: %{
+              ash_authentication?: true
+            }
+          })
           |> Ash.run_action()
           |> case do
-            {:ok, value} -> value
-            _ -> false
+            {:ok, value} ->
+              value
+
+            {:error, error} ->
+              Logger.error("""
+              Error while checking if token is revoked.
+              We must assume that it is revoked for security purposes.
+
+              #{Exception.format(:error, error)}
+              """)
+
+              true
           end
 
         :read ->
@@ -148,13 +214,32 @@ defmodule AshAuthentication.TokenResource.Actions do
           |> Query.for_read(
             is_revoked_action_name,
             %{"jti" => jti},
-            Keyword.put(opts, :domain, domain)
+            Keyword.take(Keyword.put(opts, :domain, domain), [
+              :actor,
+              :authorize?,
+              :context,
+              :tenant,
+              :tracer,
+              :domain
+            ])
           )
           |> Ash.read()
           |> case do
-            {:ok, []} -> false
-            {:ok, _} -> true
-            _ -> false
+            {:ok, []} ->
+              false
+
+            {:ok, _} ->
+              true
+
+            {:error, error} ->
+              Logger.error("""
+              Error while checking if token is revoked.
+              We must assume that it is revoked for security purposes.
+
+              #{Exception.format(:error, error)}
+              """)
+
+              true
           end
       end
     end
@@ -186,6 +271,38 @@ defmodule AshAuthentication.TokenResource.Actions do
       |> Changeset.for_create(
         revoke_token_action_name,
         %{"token" => token},
+        Keyword.merge(opts, upsert?: true)
+      )
+      |> Ash.create(domain: domain)
+      |> case do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  Revoke a token by JTI.
+
+  If you have the token, you should use `revoke/2` instead.
+  """
+  @spec revoke_jti(Resource.t(), String.t(), String.t(), keyword) ::
+          :ok | {:error, any}
+  def revoke_jti(resource, jti, subject, opts \\ []) do
+    with :ok <- assert_resource_has_extension(resource, TokenResource),
+         {:ok, domain} <- Info.token_domain(resource),
+         {:ok, revoke_token_action_name} <-
+           Info.token_revocation_revoke_jti_action_name(resource) do
+      resource
+      |> Changeset.new()
+      |> Changeset.set_context(%{
+        private: %{
+          ash_authentication?: true
+        }
+      })
+      |> Changeset.for_create(
+        revoke_token_action_name,
+        %{"jti" => jti, "subject" => subject},
         Keyword.merge(opts, upsert?: true)
       )
       |> Ash.create(domain: domain)
@@ -237,31 +354,18 @@ defmodule AshAuthentication.TokenResource.Actions do
       resource
       |> Query.new()
       |> Query.set_context(%{private: %{ash_authentication?: true}})
-      |> Query.for_read(get_token_action_name, params, opts)
-      |> Ash.read(domain: domain)
-    end
-  end
-
-  defp expunge_inside_transaction(resource, expunge_expired_action_name, opts) do
-    with :ok <- assert_resource_has_extension(resource, TokenResource),
-         {:ok, read_expired_action_name} <- Info.token_read_expired_action_name(resource) do
-      opts =
-        opts
-        |> Keyword.put_new_lazy(:domain, fn -> Info.token_domain!(resource) end)
-
-      resource
-      |> Query.new()
-      |> Query.set_context(%{private: %{ash_authentication?: true}})
-      |> Query.for_read(read_expired_action_name, %{}, opts)
-      |> Ash.bulk_destroy(
-        expunge_expired_action_name,
-        %{},
-        Keyword.put_new(opts, :strategy, [:atomic, :atomic_batches, :stream])
+      |> Query.for_read(
+        get_token_action_name,
+        params,
+        Keyword.take(Keyword.put(opts, :domain, domain), [
+          :actor,
+          :authorize?,
+          :tenant,
+          :tracer,
+          :domain
+        ])
       )
-      |> case do
-        %{status: :success, notifications: notifications} -> {:ok, notifications}
-        %{errors: errors} -> {:error, Ash.Error.to_class(errors)}
-      end
+      |> Ash.read()
     end
   end
 end

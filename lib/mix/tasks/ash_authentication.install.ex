@@ -49,11 +49,9 @@ if Code.ensure_loaded?(Igniter) do
     end
 
     @impl Igniter.Mix.Task
-    def igniter(igniter, argv) do
-      options = options!(argv)
-
+    def igniter(igniter) do
       options =
-        Keyword.put_new_lazy(options, :accounts, fn ->
+        Keyword.put_new_lazy(igniter.args.options, :accounts, fn ->
           Igniter.Project.Module.module_name(igniter, "Accounts")
         end)
 
@@ -80,15 +78,17 @@ if Code.ensure_loaded?(Igniter) do
       igniter
       |> Igniter.Project.Formatter.import_dep(:ash_authentication)
       |> Igniter.Project.Formatter.add_formatter_plugin(Spark.Formatter)
+      |> Igniter.Project.Config.configure("test.exs", :bcrypt_elixir, [:log_rounds], 1)
       |> Spark.Igniter.prepend_to_section_order(
         :"Ash.Resource",
         [:authentication, :tokens]
       )
       |> Igniter.compose_task(
         "ash.gen.domain",
-        [inspect(accounts_domain), "--ignore-if-exists"] ++ argv ++ resource_args
+        [inspect(accounts_domain), "--ignore-if-exists"] ++
+          igniter.args.argv_flags ++ resource_args
       )
-      |> generate_token_resource(token_resource, argv, resource_args)
+      |> generate_token_resource(token_resource, igniter.args.argv_flags, resource_args)
       |> Igniter.Project.Application.add_new_child(
         {AshAuthentication.Supervisor, otp_app: otp_app},
         after: fn _ -> true end
@@ -96,14 +96,14 @@ if Code.ensure_loaded?(Igniter) do
       |> setup_data_layer(repo)
       |> generate_user_resource(
         user_resource,
-        argv,
+        igniter.args.argv_flags,
         resource_args,
         token_resource,
         secrets_module,
         otp_app
       )
       |> Ash.Igniter.codegen("add_authentication_resources")
-      |> add_strategies(options, argv)
+      |> add_strategies(options, igniter.args.argv_flags)
     end
 
     defp add_strategies(igniter, options, argv) do
@@ -132,62 +132,85 @@ if Code.ensure_loaded?(Igniter) do
            secrets_module,
            otp_app
          ) do
-      case Igniter.Project.Module.find_module(igniter, user_resource) do
-        {:ok, {igniter, _, _}} ->
-          Igniter.add_warning(
-            igniter,
-            "User resource already exists: #{user_resource}, skipping creation."
-          )
+      dev_secret =
+        :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false) |> binary_part(0, 32)
 
-        {:error, igniter} ->
-          extensions = "AshAuthentication,Ash.Policy.Authorizer"
+      test_secret =
+        :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false) |> binary_part(0, 32)
 
-          extensions =
-            cond do
-              Code.ensure_loaded?(AshPostgres.DataLayer) ->
-                "postgres,#{extensions}"
+      runtime_secret =
+        {:code,
+         Sourceror.parse_string!("""
+         System.get_env("TOKEN_SIGNING_SECRET") ||
+         raise "Missing environment variable `TOKEN_SIGNING_SECRET`!"
+         """)}
 
-              Code.ensure_loaded?(AshSqlite.DataLayer) ->
-                "sqlite,#{extensions}"
+      {exists?, igniter} = Igniter.Project.Module.module_exists(igniter, user_resource)
 
-              true ->
-                extensions
-            end
+      if exists? do
+        Igniter.add_notice(
+          igniter,
+          "User resource already exists: #{user_resource}, skipping creation."
+        )
+      else
+        extensions =
+          cond do
+            Code.ensure_loaded?(AshPostgres.DataLayer) ->
+              "postgres"
 
-          dev_secret =
-            :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false) |> binary_part(0, 32)
+            Code.ensure_loaded?(AshSqlite.DataLayer) ->
+              "sqlite"
 
-          test_secret =
-            :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false) |> binary_part(0, 32)
-
-          runtime_secret =
-            {:code,
-             quote do
-               System.get_env("TOKEN_SIGNING_SECRET") ||
-                 raise "Missing environment variable `TOKEN_SIGNING_SECRET`!"
-             end}
-
-          igniter
-          |> Igniter.compose_task(
-            "ash.gen.resource",
-            [
-              inspect(user_resource),
-              "--uuid-primary-key",
-              "id",
-              "--default-actions",
-              "read",
-              "--extend",
-              extensions
-            ] ++ argv ++ resource_args
-          )
-          |> Ash.Resource.Igniter.add_action(user_resource, """
-          read :get_by_subject do
-            description "Get a user by the subject claim in a JWT"
-            argument :subject, :string, allow_nil?: false
-            get? true
-            prepare AshAuthentication.Preparations.FilterBySubject
+            true ->
+              nil
           end
-          """)
+
+        resource_args =
+          if extensions do
+            resource_args ++ ["--extend", extensions]
+          else
+            resource_args
+          end
+
+        igniter
+        |> Igniter.compose_task(
+          "ash.gen.resource",
+          [
+            inspect(user_resource),
+            "--uuid-primary-key",
+            "id",
+            "--default-actions",
+            "read"
+          ] ++ argv ++ resource_args
+        )
+      end
+      |> Igniter.compose_task(
+        "ash.extend",
+        [inspect(user_resource), "AshAuthentication,Ash.Policy.Authorizer"]
+      )
+      |> Ash.Resource.Igniter.add_new_action(user_resource, :get_by_subject, """
+      read :get_by_subject do
+        description "Get a user by the subject claim in a JWT"
+        argument :subject, :string, allow_nil?: false
+        get? true
+        prepare AshAuthentication.Preparations.FilterBySubject
+      end
+      """)
+      |> AshAuthentication.Igniter.add_new_add_on(
+        user_resource,
+        :log_out_everywhere,
+        nil,
+        """
+        log_out_everywhere do
+          apply_on_password_change? true
+        end
+        """
+      )
+      |> then(fn igniter ->
+        if exists? do
+          igniter
+        else
+          igniter
           |> Ash.Resource.Igniter.add_bypass(
             user_resource,
             quote do
@@ -206,110 +229,153 @@ if Code.ensure_loaded?(Igniter) do
               forbid_if always()
             end
           )
-          |> Spark.Igniter.set_option(user_resource, [:authentication, :tokens, :enabled?], true)
-          |> Spark.Igniter.set_option(
-            user_resource,
-            [:authentication, :tokens, :token_resource],
-            token_resource
-          )
-          |> Spark.Igniter.set_option(
-            user_resource,
-            [:authentication, :tokens, :token_resource],
-            token_resource
-          )
-          |> Spark.Igniter.set_option(
-            user_resource,
-            [:authentication, :tokens, :signing_secret],
-            secrets_module
-          )
-          |> Spark.Igniter.set_option(
-            user_resource,
-            [:authentication, :tokens, :store_all_tokens?],
-            true
-          )
-          |> Igniter.Project.Config.configure_new(
-            "dev.exs",
-            otp_app,
-            [:token_signing_secret],
-            dev_secret
-          )
-          |> Igniter.Project.Config.configure_new(
-            "test.exs",
-            otp_app,
-            [:token_signing_secret],
-            test_secret
-          )
-          |> Igniter.Project.Config.configure_runtime_env(
-            :prod,
-            otp_app,
-            [:token_signing_secret],
-            runtime_secret
-          )
-          |> AshAuthentication.Igniter.add_secret_from_env(
-            secrets_module,
-            user_resource,
-            [:authentication, :tokens, :signing_secret],
-            :token_signing_secret
-          )
-      end
+        end
+      end)
+      |> Spark.Igniter.set_option(user_resource, [:authentication, :tokens, :enabled?], true)
+      |> Spark.Igniter.set_option(
+        user_resource,
+        [:authentication, :tokens, :token_resource],
+        token_resource
+      )
+      |> Spark.Igniter.set_option(
+        user_resource,
+        [:authentication, :tokens, :token_resource],
+        token_resource
+      )
+      |> Spark.Igniter.set_option(
+        user_resource,
+        [:authentication, :tokens, :signing_secret],
+        secrets_module
+      )
+      |> Spark.Igniter.set_option(
+        user_resource,
+        [:authentication, :tokens, :store_all_tokens?],
+        true
+      )
+      |> Spark.Igniter.set_option(
+        user_resource,
+        [:authentication, :tokens, :require_token_presence_for_authentication?],
+        true
+      )
+      |> Igniter.Project.Config.configure_new(
+        "dev.exs",
+        otp_app,
+        [:token_signing_secret],
+        dev_secret
+      )
+      |> Igniter.Project.Config.configure_new(
+        "test.exs",
+        otp_app,
+        [:token_signing_secret],
+        test_secret
+      )
+      |> Igniter.Project.Config.configure_runtime_env(
+        :prod,
+        otp_app,
+        [:token_signing_secret],
+        runtime_secret
+      )
+      |> AshAuthentication.Igniter.add_new_secret_from_env(
+        secrets_module,
+        user_resource,
+        [:authentication, :tokens, :signing_secret],
+        :token_signing_secret
+      )
     end
 
     defp generate_token_resource(igniter, token_resource, _argv, resource_args) do
-      case Igniter.Project.Module.find_module(igniter, token_resource) do
-        {:ok, {igniter, _, _}} ->
-          Igniter.add_warning(
-            igniter,
-            "Token resource already exists: #{token_resource}, skipping creation."
-          )
+      {exists?, igniter} = Igniter.Project.Module.module_exists(igniter, token_resource)
 
-        {:error, igniter} ->
-          extensions = "AshAuthentication.TokenResource,Ash.Policy.Authorizer"
+      if exists? do
+        Igniter.add_notice(
+          igniter,
+          "Token resource already exists: #{token_resource}, skipping creation."
+        )
+      else
+        extensions =
+          cond do
+            Code.ensure_loaded?(AshPostgres.DataLayer) ->
+              "postgres"
 
-          extensions =
-            cond do
-              Code.ensure_loaded?(AshPostgres.DataLayer) ->
-                "postgres,#{extensions}"
+            Code.ensure_loaded?(AshSqlite.DataLayer) ->
+              "sqlite"
 
-              Code.ensure_loaded?(AshSqlite.DataLayer) ->
-                "sqlite,#{extensions}"
-
-              true ->
-                extensions
-            end
-
-          igniter
-          |> Igniter.compose_task(
-            "ash.gen.resource",
-            [
-              inspect(token_resource),
-              "--default-actions",
-              "read",
-              "--extend",
-              extensions,
-              "--uuid-primary-key",
-              "id",
-              "--attribute",
-              "jti:string:primary_key:public:required:sensitive",
-              "--attribute",
-              "subject:string:required",
-              "--attribute",
-              "expires_at:utc_datetime:required",
-              "--attribute",
-              "purpose:string:required:public",
-              "--attribute",
-              "extra_data:map:public",
-              "--timestamps"
-            ] ++ resource_args
-          )
-          # Consider moving to the extension's `install/5` callback, but we need
-          # to only run it if the resource is being created which we can't
-          # currently tell in that callback
-          |> Ash.Resource.Igniter.add_action(token_resource, """
-          read :expired do
-            description "Look up all expired tokens."
-            filter expr(expires_at < now())
+            true ->
+              nil
           end
-          """)
+
+        resource_args =
+          if extensions do
+            resource_args ++ ["--extend", extensions]
+          else
+            resource_args
+          end
+
+        igniter
+        |> Igniter.compose_task(
+          "ash.gen.resource",
+          [
+            inspect(token_resource),
+            "--default-actions",
+            "read"
+          ] ++ resource_args
+        )
+      end
+      |> Igniter.compose_task("ash.extend", [
+        inspect(token_resource),
+        "AshAuthentication.TokenResource,Ash.Policy.Authorizer"
+      ])
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :jti, """
+      attribute :jti, :string do
+        primary_key? true
+        public? true
+        allow_nil? false
+        sensitive? true
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :subject, """
+      attribute :subject, :string do
+        allow_nil? false
+        public? true
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :expires_at, """
+      attribute :expires_at, :utc_datetime do
+        allow_nil? false
+        public? true
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :purpose, """
+      attribute :purpose, :string do
+        allow_nil? false
+        public? true
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :extra_data, """
+      attribute :extra_data, :map do
+        public? true
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :created_at, """
+      create_timestamp :created_at
+      """)
+      |> Ash.Resource.Igniter.add_new_attribute(token_resource, :updated_at, """
+      update_timestamp :updated_at
+      """)
+      # Consider moving to the extension's `install/5` callback, but we need
+      # to only run it if the resource is being created which we can't
+      # currently tell in that callback
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :expired, """
+      read :expired do
+        description "Look up all expired tokens."
+        filter expr(expires_at < now())
+      end
+      """)
+      |> then(fn igniter ->
+        if exists? do
+          igniter
+        else
+          igniter
           |> Ash.Resource.Igniter.add_bypass(
             token_resource,
             quote do
@@ -330,65 +396,69 @@ if Code.ensure_loaded?(Igniter) do
               forbid_if always()
             end
           )
-          |> Ash.Resource.Igniter.add_action(token_resource, """
-          read :get_token do
-            description "Look up a token by JTI or token, and an optional purpose."
-            get? true
-            argument :token, :string, sensitive?: true
-            argument :jti, :string, sensitive?: true
-            argument :purpose, :string, sensitive?: false
+        end
+      end)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :get_token, """
+      read :get_token do
+        description "Look up a token by JTI or token, and an optional purpose."
+        get? true
+        argument :token, :string, sensitive?: true
+        argument :jti, :string, sensitive?: true
+        argument :purpose, :string, sensitive?: false
 
-            prepare AshAuthentication.TokenResource.GetTokenPreparation
-          end
-          """)
-          |> Ash.Resource.Igniter.add_action(token_resource, """
-          action :revoked? do
-            description "Returns true if a revocation token is found for the provided token"
-            argument :token, :string, sensitive?: true, allow_nil?: false
-            argument :jti, :string, sensitive?: true, allow_nil?: false
-
-            run AshAuthentication.TokenResource.IsRevoked
-          end
-          """)
-          |> Ash.Resource.Igniter.add_action(token_resource, """
-          create :revoke_token do
-            description "Revoke a token. Creates a revocation token corresponding to the provided token."
-            accept [:extra_data]
-            argument :token, :string, allow_nil?: false, sensitive?: true
-
-            change AshAuthentication.TokenResource.RevokeTokenChange
-          end
-          """)
-          # |> Ash.Resource.Igniter.add_action(token_resource, """
-          # read :get_confirmation_changes do
-          #   argument :jti, :string, allow_nil?: false, sensitive?: true
-          #   get? true
-
-          #   prepare AshAuthentication.TokenResource.GetConfirmationChangesPreparation
-          # end
-          # """)
-          # |> Ash.Resource.Igniter.add_action(token_resource, """
-          # create :store_confirmation_changes do
-          #   accept [:extra_data, :purpose]
-          #   argument :token, :string, allow_nil?: false, sensitive?: true
-          #   change AshAuthentication.TokenResource.StoreConfirmationChangesChange
-          # end
-          # """)
-          |> Ash.Resource.Igniter.add_action(token_resource, """
-          create :store_token do
-            description "Stores a token used for the provided purpose."
-            accept [:extra_data, :purpose]
-            argument :token, :string, allow_nil?: false, sensitive?: true
-            change AshAuthentication.TokenResource.StoreTokenChange
-          end
-          """)
-          |> Ash.Resource.Igniter.add_action(token_resource, """
-          destroy :expunge_expired do
-            description "Deletes expired tokens."
-            change filter(expr(expires_at < now()))
-          end
-          """)
+        prepare AshAuthentication.TokenResource.GetTokenPreparation
       end
+      """)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :revoked?, """
+      action :revoked?, :boolean do
+        description "Returns true if a revocation token is found for the provided token"
+        argument :token, :string, sensitive?: true
+        argument :jti, :string, sensitive?: true
+
+        run AshAuthentication.TokenResource.IsRevoked
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :revoke_token, """
+      create :revoke_token do
+        description "Revoke a token. Creates a revocation token corresponding to the provided token."
+        accept [:extra_data]
+        argument :token, :string, allow_nil?: false, sensitive?: true
+
+        change AshAuthentication.TokenResource.RevokeTokenChange
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :revoke_jti, """
+      create :revoke_jti do
+        description "Revoke a token by JTI. Creates a revocation token corresponding to the provided jti."
+        accept [:extra_data]
+        argument :subject, :string, allow_nil?: false, sensitive?: true
+        argument :jti, :string, allow_nil?: false, sensitive?: true
+
+        change AshAuthentication.TokenResource.RevokeJtiChange
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :store_token, """
+      create :store_token do
+        description "Stores a token used for the provided purpose."
+        accept [:extra_data, :purpose]
+        argument :token, :string, allow_nil?: false, sensitive?: true
+        change AshAuthentication.TokenResource.StoreTokenChange
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :expunge_expired, """
+      destroy :expunge_expired do
+        description "Deletes expired tokens."
+        change filter(expr(expires_at < now()))
+      end
+      """)
+      |> Ash.Resource.Igniter.add_new_action(token_resource, :revoke_all_stored_for_subject, """
+      update :revoke_all_stored_for_subject do
+        description "Revokes all stored tokens for a specific subject."
+        accept [:extra_data]
+        argument :subject, :string, allow_nil?: false, sensitive?: true
+        change AshAuthentication.TokenResource.RevokeAllStoredForSubjectChange
+      end
+      """)
     end
 
     cond do

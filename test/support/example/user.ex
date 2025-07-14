@@ -46,12 +46,53 @@ defmodule Example.User do
       manual Example.CurrentUserRead
     end
 
+    read :sign_in_with_api_key do
+      argument :api_key, :string, allow_nil?: false
+      prepare AshAuthentication.Strategy.ApiKey.SignInPreparation
+    end
+
     update :update do
       argument :password, :string, allow_nil?: true, sensitive?: true
       argument :password_confirmation, :string, allow_nil?: true, sensitive?: true
-      accept [:username]
+      accept [:username, :hashed_password, :confirmed_at]
       primary? true
       require_atomic? false
+    end
+
+    read :sign_in_with_token do
+      description "Attempt to sign in using a short-lived sign in token."
+      get? true
+
+      argument :token, :string do
+        description "The short-lived sign in token."
+        allow_nil? false
+        sensitive? true
+      end
+
+      argument :remember_me, :boolean, default: false
+
+      prepare AshAuthentication.Strategy.Password.SignInWithTokenPreparation
+
+      metadata :token, :string do
+        description "A JWT that can be used to authenticate the user."
+        allow_nil? false
+      end
+
+      metadata :remember_me, :boolean, default: false
+
+      prepare fn query, _ctx ->
+        query
+        |> Ash.Query.after_action(fn
+          query, [user] ->
+            remember_me = query |> Ash.Query.get_argument(:remember_me)
+            user = user |> Ash.Resource.put_metadata(:remember_me, remember_me)
+
+            {:ok, [user]}
+
+          query, [] ->
+            {:ok, []}
+        end)
+      end
     end
 
     create :register_with_auth0 do
@@ -167,6 +208,7 @@ defmodule Example.User do
 
   authentication do
     select_for_senders([:username])
+    session_identifier(:jti)
 
     tokens do
       enabled? true
@@ -179,6 +221,7 @@ defmodule Example.User do
       confirmation :confirm do
         monitor_fields [:username]
         inhibit_updates? true
+        require_interaction? true
 
         sender fn _user, token, opts ->
           username =
@@ -204,6 +247,10 @@ defmodule Example.User do
             )
           end
         end
+      end
+
+      api_key do
+        api_key_relationship(:valid_api_keys)
       end
 
       oauth2 do
@@ -256,6 +303,8 @@ defmodule Example.User do
       end
 
       magic_link do
+        require_interaction? true
+
         sender fn user, token, _opts ->
           Logger.debug("Magic link request for #{user.username}, token #{inspect(token)}")
         end
@@ -278,6 +327,10 @@ defmodule Example.User do
         identity_resource Example.UserIdentity
       end
     end
+  end
+
+  relationships do
+    has_many :valid_api_keys, Example.ApiKey
   end
 
   identities do

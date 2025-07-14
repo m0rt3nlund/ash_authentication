@@ -3,6 +3,41 @@ if Code.ensure_loaded?(Igniter) do
   defmodule AshAuthentication.Igniter do
     @moduledoc "Codemods for working with AshAuthentication"
 
+    @doc "Adds a secret to a secret module that reads from application env, if one for that module/path doesn't exist already."
+    @spec add_new_secret_from_env(Igniter.t(), module(), Ash.Resource.t(), list(atom), atom()) ::
+            Igniter.t()
+    def add_new_secret_from_env(igniter, module, resource, path, env_key) do
+      otp_app = Igniter.Project.Application.app_name(igniter)
+
+      func =
+        quote do
+          def secret_for(unquote(path), unquote(resource), _opts, _context),
+            do: Application.fetch_env(unquote(otp_app), unquote(env_key))
+        end
+
+      full =
+        quote do
+          use AshAuthentication.Secret
+          unquote(func)
+        end
+        |> Sourceror.to_string()
+
+      Igniter.Project.Module.find_and_update_or_create_module(igniter, module, full, fn zipper ->
+        with {:ok, zipper} <-
+               Igniter.Code.Function.move_to_def(zipper, :secret_for, 4, target: :at),
+             zipper when not is_nil(zipper) <- Sourceror.Zipper.down(zipper),
+             zipper when not is_nil(zipper) <- Sourceror.Zipper.down(zipper),
+             true <- Igniter.Code.Common.nodes_equal?(zipper, path),
+             zipper when not is_nil(zipper) <- Sourceror.Zipper.right(zipper),
+             true <- Igniter.Code.Common.nodes_equal?(zipper, resource) do
+          {:ok, zipper}
+        else
+          _ ->
+            {:ok, Igniter.Code.Common.add_code(zipper, func)}
+        end
+      end)
+    end
+
     @doc "Adds a secret to a secret module that reads from application env"
     @spec add_secret_from_env(Igniter.t(), module(), Ash.Resource.t(), list(atom), atom()) ::
             Igniter.t()
@@ -11,7 +46,7 @@ if Code.ensure_loaded?(Igniter) do
 
       func =
         quote do
-          def secret_for(unquote(path), unquote(resource), _opts),
+          def secret_for(unquote(path), unquote(resource), _opts, _context),
             do: Application.fetch_env(unquote(otp_app), unquote(env_key))
         end
 
@@ -32,7 +67,7 @@ if Code.ensure_loaded?(Igniter) do
             Igniter.t(),
             Ash.Resource.t(),
             type :: atom,
-            name :: atom,
+            name :: atom | nil,
             contents :: String.t()
           ) :: Igniter.t()
     def add_new_add_on(igniter, resource, type, name, contents) do
@@ -92,7 +127,7 @@ if Code.ensure_loaded?(Igniter) do
                  zipper,
                  constructor,
                  [1, 2],
-                 &Igniter.Code.Function.argument_equals?(&1, 0, name)
+                 &add_on_matches?(&1, name)
                ) do
           {:ok, true}
         else
@@ -107,6 +142,14 @@ if Code.ensure_loaded?(Igniter) do
         {:error, igniter} ->
           {igniter, false}
       end
+    end
+
+    defp add_on_matches?(zipper, nil) do
+      Igniter.Code.Function.move_to_nth_argument(zipper, 1) == :error
+    end
+
+    defp add_on_matches?(zipper, name) do
+      Igniter.Code.Function.argument_equals?(zipper, 0, name)
     end
 
     @doc "Adds a new strategy to the authentication.strategies section of a resource"
@@ -175,6 +218,38 @@ if Code.ensure_loaded?(Igniter) do
                  constructor,
                  [1, 2],
                  &Igniter.Code.Function.argument_equals?(&1, 0, name)
+               ) do
+          {:ok, true}
+        else
+          _ ->
+            :error
+        end
+      end)
+      |> case do
+        {:ok, igniter, _module, _value} ->
+          {igniter, true}
+
+        {:error, igniter} ->
+          {igniter, false}
+      end
+    end
+
+    @doc "Returns true if the given resource defines an authentication strategy of the provided type"
+    @spec defines_strategy_of_type(
+            Igniter.t(),
+            Ash.Resource.t(),
+            constructor :: atom()
+          ) ::
+            {Igniter.t(), true | false}
+    def defines_strategy_of_type(igniter, resource, constructor) do
+      Spark.Igniter.find(igniter, resource, fn _, zipper ->
+        with {:ok, zipper} <- enter_section(zipper, :authentication),
+             {:ok, zipper} <- enter_section(zipper, :strategies),
+             {:ok, _zipper} <-
+               Igniter.Code.Function.move_to_function_call_in_current_scope(
+                 zipper,
+                 constructor,
+                 [1, 2]
                ) do
           {:ok, true}
         else

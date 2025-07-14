@@ -5,6 +5,483 @@ See [Conventional Commits](Https://conventionalcommits.org) for commit guideline
 
 <!-- changelog -->
 
+## [v4.9.6](https://github.com/team-alembic/ash_authentication/compare/v4.9.5...v4.9.6) (2025-07-11)
+
+
+
+
+### Bug Fixes:
+
+* support --identity-field option in the installer by Zach Daniel
+
+### Improvements:
+
+* Pass all args to sign_in_with_token action of password strategies (#1009) by Jinkyou Son
+
+## [v4.9.5](https://github.com/team-alembic/ash_authentication/compare/v4.9.4...v4.9.5) (2025-07-02)
+
+
+
+
+### Bug Fixes:
+
+* set private ash authentication context on query loads by Zach Daniel
+
+* don't require session identifier if tokens not enabled by Zach Daniel
+
+* don't require token resource for API keys by Zach Daniel
+
+* Send opts to validate token (#1031) by Josep Jaume Rey
+
+## [v4.9.4](https://github.com/team-alembic/ash_authentication/compare/v4.9.3...v4.9.4) (2025-06-19)
+
+
+
+
+### Bug Fixes:
+
+* ensure `require_confirmed_with` is honored when sign in tokens disabled by Zach Daniel
+
+## [v4.9.3](https://github.com/team-alembic/ash_authentication/compare/v4.9.2...v4.9.3) (2025-06-18)
+
+
+
+
+### Bug Fixes:
+
+* ensure installer is idempotent by Zach Daniel
+
+## [v4.9.2](https://github.com/team-alembic/ash_authentication/compare/v4.9.1...v4.9.2) (2025-06-17)
+
+
+
+
+### Improvements:
+
+* better verifier warning by Zach Daniel
+
+## [v4.9.1](https://github.com/team-alembic/ash_authentication/compare/v4.9.0...v4.9.1) (2025-06-16)
+
+
+
+
+### Improvements:
+
+* add utility to revoke all session tokens (#1026) by Zach Daniel
+
+* store jti in session when not requiring token storage by Zach Daniel
+
+## [v4.9.0](https://github.com/team-alembic/ash_authentication/compare/v4.8.7...v4.9.0) (2025-05-30)
+
+
+
+
+### Features:
+
+* Password: Support password hashing with Argon2. (#998)
+
+### Bug Fixes:
+
+* set correct default on_error (#1008)
+
+* Info.strategy_for_action/2 -> Info.find_strategy/3 (#1007)
+
+* remove strict type validation on api key id type
+
+* set `required?: true` when adding api key strategy
+
+### Improvements:
+
+* improve secret validation and security (#1010)
+
+* use `after_verify` hook for secret module checks
+
+* extract params from subject name (#1006)
+
+## [v4.8.7](https://github.com/team-alembic/ash_authentication/compare/v4.8.6...v4.8.7) (2025-05-20)
+
+
+
+
+### Bug Fixes:
+
+* incorrect warning in password verifier.
+
+* remove underscores from app name for prefix
+
+### Improvements:
+
+* Strategy.Custom: The `strategy_module` field is no longer required.
+
+## [v4.8.6](https://github.com/team-alembic/ash_authentication/compare/v4.8.5...v4.8.6) (2025-05-16)
+
+
+
+
+### Bug Fixes:
+
+* remove underscores from app name for prefix
+
+## [v4.8.5](https://github.com/team-alembic/ash_authentication/compare/v4.8.4...v4.8.5) (2025-05-15)
+
+
+
+
+### Improvements:
+
+* provide explicit name to api key strategy when installed
+
+## [v4.8.4](https://github.com/team-alembic/ash_authentication/compare/v4.8.3...v4.8.4) (2025-05-15)
+
+
+
+
+### Improvements:
+
+* Confirmation: Provide a default accept phase form. (#986)
+
+* pass along the action_input.context to the send_opts as `:context`. (#989)
+
+## [v4.8.3](https://github.com/team-alembic/ash_authentication/compare/v4.8.2...v4.8.3) (2025-05-09)
+
+
+
+
+### Bug Fixes:
+
+* properly use path params for magic link token
+
+## [v4.8.2](https://github.com/team-alembic/ash_authentication/compare/v4.8.1...v4.8.2) (2025-05-07)
+
+
+
+
+### Bug Fixes:
+
+* Typo (another) in `ash_authentication.add_strategy` task.
+
+## [v4.8.1](https://github.com/team-alembic/ash_authentication/compare/v4.8.0...v4.8.1) (2025-05-07)
+
+
+
+
+### Bug Fixes:
+
+* Typo in `ash_authentication.add_strategy` task.
+
+## [v4.8.0](https://github.com/team-alembic/ash_authentication/compare/v4.7.7...v4.8.0) (2025-05-07)
+
+
+
+
+### Features:
+
+* Add API key authentication strategy (#984)
+
+### Bug Fixes:
+
+* MagicLink: Add `require_interaction?` option to magic link strategy. (#976)
+
+* SignInPreparation: Filter out users with nil hashed password field. (#982)
+
+### Improvements:
+
+* pass along the tenant claim(if exists) to the long-lived token (#981)
+
+## [v4.7.7](https://github.com/team-alembic/ash_authentication/compare/v4.7.6...v4.7.7) (2025-04-29)
+
+
+
+
+### Bug Fixes:
+
+* Use correct bypass config key for confirmation CVE
+
+### Improvements:
+
+* support installing AshAuthentication on top of existing resources
+
+## [v4.7.6](https://github.com/team-alembic/ash_authentication/compare/v4.7.5...v4.7.6) (2025-04-16)
+
+
+
+
+### Bug Fixes:
+
+* switch method back again to `:get` like its supposed to be ð¤¦ââï¸
+
+## [v4.7.5](https://github.com/team-alembic/ash_authentication/compare/v4.7.4...v4.7.5) (2025-04-15)
+
+
+
+
+### Bug Fixes:
+
+* *actually* use `:post` as method for callback
+
+## [v4.7.4](https://github.com/team-alembic/ash_authentication/compare/v4.7.3...v4.7.4) (2025-04-15)
+
+
+
+
+### Bug Fixes:
+
+* use get as method for callback phase in oauth2
+
+## [v4.7.3](https://github.com/team-alembic/ash_authentication/compare/v4.7.2...v4.7.3) (2025-04-15)
+
+
+
+
+### Improvements:
+
+* better error message for `require_interaction?` option
+
+## [v4.7.2](https://github.com/team-alembic/ash_authentication/compare/v4.7.1...v4.7.2) (2025-04-14)
+
+
+
+
+### Bug Fixes:
+
+* fix more email templates
+
+## [v4.7.1](https://github.com/team-alembic/ash_authentication/compare/v4.7.0...v4.7.1) (2025-04-14)
+
+
+
+
+### Bug Fixes:
+
+* update generated email templates to use the correct link
+
+## [v4.7.0](https://github.com/team-alembic/ash_authentication/compare/v4.6.4...v4.7.0) (2025-04-14)
+
+
+
+
+### Improvements:
+
+* mitigate medium-sev security issue for confirmation emails (#968)
+
+For more information see the security advisory: https://github.com/team-alembic/ash_authentication/security/advisories/GHSA-3988-q8q7-p787
+
+* generate `created_at` timestamp on add_strategy
+
+## [v4.6.4](https://github.com/team-alembic/ash_authentication/compare/v4.6.3...v4.6.4) (2025-04-09)
+
+
+
+
+### Bug Fixes:
+
+* Potential timing attack introduced by #961. (#962)
+
+* add guard clause when input is nil (#961)
+
+* failing installer test.
+
+* replace secret_for/3 with secret_for/4 in the igniter.ex (#953)
+
+## [v4.6.3](https://github.com/team-alembic/ash_authentication/compare/v4.6.2...v4.6.3) (2025-03-27)
+
+
+
+
+### Improvements:
+
+* add `AshAuthentication.Plug.Helpers.assign_new_resources/4` (#951)
+
+* Add a patchable empty `authentication.providers` section. (#952)
+
+* delete_session on unsuccessful auth (#950)
+
+## [v4.6.2](https://github.com/team-alembic/ash_authentication/compare/v4.6.1...v4.6.2) (2025-03-25)
+
+
+
+
+### Bug Fixes:
+
+* use `after_compile` hook for secrets verification, not after_verify
+
+## [v4.6.1](https://github.com/team-alembic/ash_authentication/compare/v4.6.0...v4.6.1) (2025-03-25)
+
+
+
+
+### Bug Fixes:
+
+* make request_for_token_identity backwards compatible (#949)
+
+* Multitenant magic link redirect (#945)
+
+* properly match on `:ok` resp from generic reset action
+
+## [v4.6.0](https://github.com/team-alembic/ash_authentication/compare/v4.5.6...v4.6.0) (2025-03-20)
+
+
+
+
+### Features:
+
+* add context to secret functions
+
+* add context to secret functions
+
+### Bug Fixes:
+
+* add missing opts for multitenancy in various places
+
+* set context when building changeset instead of calling action
+
+## [v4.5.6](https://github.com/team-alembic/ash_authentication/compare/v4.5.5...v4.5.6) (2025-03-18)
+
+
+
+
+### Bug Fixes:
+
+* set min length constraint on password update in generators
+
+### Improvements:
+
+* use `touching?` option so log out everywhere is atomic
+
+* Allow custom attribute name for created_at (#871)
+
+* set `bcrypt_elixir` rounds to 1 in test.exs in installer
+
+## [v4.5.5](https://github.com/team-alembic/ash_authentication/compare/v4.5.4...v4.5.5) (2025-03-12)
+
+
+
+
+### Bug Fixes:
+
+* Do not enforce confirm_at attribute type (#935)
+
+## [v4.5.4](https://github.com/team-alembic/ash_authentication/compare/v4.5.3...v4.5.4) (2025-03-12)
+
+
+
+
+### Bug Fixes:
+
+* use create/update timestamp in installers
+
+## [v4.5.3](https://github.com/team-alembic/ash_authentication/compare/v4.5.2...v4.5.3) (2025-03-07)
+
+
+
+
+### Bug Fixes:
+
+* fix the installer to only pass flags to nested tasks
+
+* use proper postgres version in error message
+
+* Added tenant to password reset sender opts (#930)
+
+## [v4.5.2](https://github.com/team-alembic/ash_authentication/compare/v4.5.1...v4.5.2) (2025-02-25)
+
+
+
+
+### Bug Fixes:
+
+* ensure token expunger sets context that allows it to run (#921)
+
+* pass `opts` to `Confirmation.Actions.store_changes/4`
+
+* use the stringified tenant in the token
+
+* JWT: Generate tenant claims and validate them. (#914)
+
+* ensure that tenant is set and ferried through all operations
+
+* pass tenant through token revoked check
+
+* assume tokens are revoked on error
+
+### Improvements:
+
+* authorize with error to make expunge errors clearer
+
+* Add tenant to new user confirmation sender (#920)
+
+* Add multi tenant tests (#915)
+
+* adding example repo for multi tenant enabled user
+
+## [v4.5.1](https://github.com/team-alembic/ash_authentication/compare/v4.5.0...v4.5.1) (2025-02-14)
+
+
+
+
+### Improvements:
+
+* note on token error about upgrading ash_postgres
+
+## [v4.5.0](https://github.com/team-alembic/ash_authentication/compare/v4.4.9...v4.5.0) (2025-02-13)
+
+
+
+
+### Features:
+
+* Add a `log_out_everywhere` add-on (#907)
+
+* Add a `log_out_everywhere` add-on
+
+### Bug Fixes:
+
+* ensure that the token resource has only `:jti` as a primary key (#908)
+
+* Sign in tokens only last 60 seconds, but they should still be revoked after use. (#906)
+
+## [v4.4.9](https://github.com/team-alembic/ash_authentication/compare/v4.4.8...v4.4.9) (2025-02-11)
+
+
+
+
+### Bug Fixes:
+
+* Ensure that installer generated token revocation checking action is correct. (#905)
+
+## [v4.4.8](https://github.com/team-alembic/ash_authentication/compare/v4.4.7...v4.4.8) (2025-02-04)
+
+
+
+
+### Bug Fixes:
+
+* fix marking hashed_password as `allow_nil?` in magic link installer
+
+### Improvements:
+
+* Allow authorization params to be defined using secret module (#900)
+
+## [v4.4.7](https://github.com/team-alembic/ash_authentication/compare/v4.4.6...v4.4.7) (2025-02-02)
+
+
+
+
+### Bug Fixes:
+
+* downgrade assent
+
+* OIDC: Not retrieving remote OIDC configuration.
+
+## [v4.4.6](https://github.com/team-alembic/ash_authentication/compare/v4.4.5...v4.4.6) (2025-02-01)
+
+
+
+
+### Bug Fixes:
+
+* OIDC: Not retrieving remote OIDC configuration.
+
 ## [v4.4.5](https://github.com/team-alembic/ash_authentication/compare/v4.4.4...v4.4.5) (2025-01-27)
 
 

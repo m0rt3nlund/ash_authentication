@@ -33,7 +33,7 @@ defmodule MyApp.Accounts.User do
 end
 ```
 
-Please check the guide on how to properly configure your Secrets
+Please check the [guide](https://hexdocs.pm/ash_authentication/AshAuthentication.Secret.html) on how to properly configure your Secrets.
 Then we need to define an action that will handle the oauth2 flow, for the google case it is `:register_with_google` it will handle both cases for our resource, user registration & login.
 
 ```elixir
@@ -65,12 +65,6 @@ defmodule MyApp.Accounts.User do
       # Required if you're using the password & confirmation strategies
       upsert_fields []
       change set_attribute(:confirmed_at, &DateTime.utc_now/0)
-      change after_action(fn _changeset, user, _context ->
-        case user.confirmed_at do
-          nil -> {:error, "Unconfirmed user exists already"}
-          _ -> {:ok, user}
-        end
-      end)
     end
   end
 

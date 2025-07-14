@@ -4,6 +4,8 @@ defmodule Mix.Tasks.AshAuthentication.AddStrategyTest do
 
   import Igniter.Test
 
+  @moduletag :igniter
+
   setup do
     igniter =
       test_project()
@@ -25,6 +27,79 @@ defmodule Mix.Tasks.AshAuthentication.AddStrategyTest do
       + |    strategies do
       + |      password :password do
       + |        identity_field(:email)
+      + |        hash_provider(AshAuthentication.BcryptProvider)
+      + |
+      + |        resettable do
+      + |          sender(Test.Accounts.User.Senders.SendPasswordResetEmail)
+      + |          # these configurations will be the default in a future release
+      + |          password_reset_action_name(:reset_password_with_token)
+      + |          request_password_reset_action_name(:request_password_reset_token)
+      + |        end
+      + |      end
+      + |    end
+      """)
+    end
+
+    test "the `bcrypt` hash provider can be selected", %{igniter: igniter} do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", [
+        "password",
+        "--hash-provider",
+        "bcrypt"
+      ])
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + |    strategies do
+      + |      password :password do
+      + |        identity_field(:email)
+      + |        hash_provider(AshAuthentication.BcryptProvider)
+      + |
+      + |        resettable do
+      + |          sender(Test.Accounts.User.Senders.SendPasswordResetEmail)
+      + |          # these configurations will be the default in a future release
+      + |          password_reset_action_name(:reset_password_with_token)
+      + |          request_password_reset_action_name(:request_password_reset_token)
+      + |        end
+      + |      end
+      + |    end
+      """)
+    end
+
+    test "the `argon2` hash provider can be selected", %{igniter: igniter} do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", [
+        "password",
+        "--hash-provider",
+        "argon2"
+      ])
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + |    strategies do
+      + |      password :password do
+      + |        identity_field(:email)
+      + |        hash_provider(AshAuthentication.Argon2Provider)
+      + |
+      + |        resettable do
+      + |          sender(Test.Accounts.User.Senders.SendPasswordResetEmail)
+      + |          # these configurations will be the default in a future release
+      + |          password_reset_action_name(:reset_password_with_token)
+      + |          request_password_reset_action_name(:request_password_reset_token)
+      + |        end
+      + |      end
+      + |    end
+      """)
+    end
+
+    test "an arbitrary hash provider can be entered", %{igniter: igniter} do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", [
+        "password",
+        "--hash-provider",
+        "MyApp.ExampleHashProvider"
+      ])
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + |    strategies do
+      + |      password :password do
+      + |        identity_field(:email)
+      + |        hash_provider(MyApp.ExampleHashProvider)
       + |
       + |        resettable do
       + |          sender(Test.Accounts.User.Senders.SendPasswordResetEmail)
@@ -60,6 +135,8 @@ defmodule Mix.Tasks.AshAuthentication.AddStrategyTest do
       + |      allow_nil?(false)
       + |      sensitive?(true)
       + |    end
+      + |
+      + |    attribute(:confirmed_at, :utc_datetime_usec)
       """)
     end
 
@@ -212,11 +289,41 @@ defmodule Mix.Tasks.AshAuthentication.AddStrategyTest do
       """)
     end
 
-    test "adds the bcrypt dependency", %{igniter: igniter} do
+    test "adds the bcrypt_elixir dependency when no hash provider is selected", %{
+      igniter: igniter
+    } do
       igniter
       |> Igniter.compose_task("ash_authentication.add_strategy", ["password"])
       |> assert_has_patch("mix.exs", """
       + |      {:bcrypt_elixir, "~> 3.0"},
+      """)
+    end
+
+    test "adds the bcrypt_elixir dependency when the bcrypt hash provider is selected", %{
+      igniter: igniter
+    } do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", [
+        "password",
+        "--hash-provider",
+        "bcrypt"
+      ])
+      |> assert_has_patch("mix.exs", """
+      + |      {:bcrypt_elixir, "~> 3.0"},
+      """)
+    end
+
+    test "adds the argon2_elixir dependency when the argon2 hash provider is selected", %{
+      igniter: igniter
+    } do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", [
+        "password",
+        "--hash-provider",
+        "argon2"
+      ])
+      |> assert_has_patch("mix.exs", """
+      + |      {:argon2_elixir, "~> 4.0"},
       """)
     end
 
@@ -271,6 +378,120 @@ defmodule Mix.Tasks.AshAuthentication.AddStrategyTest do
           \"\"\")
         end
       end
+      """)
+    end
+  end
+
+  describe "api_key" do
+    test "adds the api_key strategy to the user", %{igniter: igniter} do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", ["api_key"])
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + | api_key :api_key do
+      + |   api_key_relationship(:valid_api_keys)
+      + |   api_key_hash_attribute(:api_key_hash)
+      + | end
+      """)
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + | has_many :valid_api_keys, Test.Accounts.ApiKey do
+      + |   filter(expr(valid))
+      + | end
+      """)
+    end
+
+    test "creates the api key resource", %{igniter: igniter} do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", ["api_key"])
+      |> assert_creates("lib/test/accounts/api_key.ex", """
+      defmodule Test.Accounts.ApiKey do
+        use Ash.Resource,
+          otp_app: :test,
+          domain: Test.Accounts,
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer]
+
+        attributes do
+          uuid_primary_key(:id)
+
+          attribute :api_key_hash, :binary do
+            allow_nil?(false)
+            sensitive?(true)
+          end
+
+          attribute :expires_at, :utc_datetime_usec do
+            allow_nil?(false)
+          end
+        end
+
+        relationships do
+          belongs_to(:user, Test.Accounts.User)
+        end
+
+        actions do
+          defaults([:read, :destroy])
+
+          create :create do
+            primary?(true)
+            accept([:user_id, :expires_at])
+
+            change(
+              {AshAuthentication.Strategy.ApiKey.GenerateApiKey, prefix: :test, hash: :api_key_hash}
+            )
+          end
+        end
+
+        postgres do
+          table("api_keys")
+          repo(Test.Repo)
+        end
+
+        identities do
+          identity(:unique_api_key, [:api_key_hash])
+        end
+
+        calculations do
+          calculate(:valid, :boolean, expr(expires_at > now()))
+        end
+
+        policies do
+          bypass AshAuthentication.Checks.AshAuthenticationInteraction do
+            authorize_if(always())
+          end
+        end
+      end
+      """)
+    end
+  end
+
+  describe "magic_link" do
+    test "makes hashed_password optional", %{igniter: igniter} do
+      igniter
+      |> Igniter.compose_task("ash_authentication.add_strategy", ["password"])
+      |> apply_igniter!()
+      |> Igniter.compose_task("ash_authentication.add_strategy", ["magic_link"])
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+        |    attribute :hashed_password, :string do
+      - |      allow_nil?(false)
+        |      sensitive?(true)
+        |    end
+      """)
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + |   action :request_magic_link do
+      + |     argument :email, :ci_string do
+      + |       allow_nil?(false)
+      + |     end
+      + |
+      + |     run(AshAuthentication.Strategy.MagicLink.Request)
+      + |   end
+      """)
+      |> assert_has_patch("lib/test/accounts/user.ex", """
+      + |     magic_link do
+      + |       identity_field(:email)
+      + |       registration_enabled?(true)
+      + |       require_interaction?(true)
+      + |
+      + |       sender(Test.Accounts.User.Senders.SendMagicLinkEmail)
+      + |     end
       """)
     end
   end

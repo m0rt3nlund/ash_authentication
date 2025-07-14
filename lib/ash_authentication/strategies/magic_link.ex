@@ -78,6 +78,20 @@ defmodule AshAuthentication.Strategy.MagicLink do
       ...> signed_in_user.id == user
       true
 
+  ## Usage with AshAuthenticationPhoenix
+
+  If you are using `AshAuthenticationPhoenix`, and have `require_authentication?` set to `true`, which you very much should, then you will need to add a `magic_sign_in_route` to your router. This is placed in the same location as `auth_routes`, and should be provided the user and the strategy name. For example:
+
+  ```elixir
+  # Remove this if you do not want to use the magic link strategy
+  magic_sign_in_route(
+    MyApp.Accounts.User,
+    :sign_in,
+    auth_routes_prefix: "/auth",
+    overrides: [MyApp.AuthOverrides, AshAuthentication.Phoenix.Overrides.Default]
+  )
+  ```
+
   ## Plugs
 
   The magic link strategy provides plug endpoints for both request and sign-in
@@ -107,16 +121,16 @@ defmodule AshAuthentication.Strategy.MagicLink do
   """
 
   defstruct identity_field: :username,
+            lookup_action_name: nil,
             name: nil,
-            request_action_name: nil,
-            resource: nil,
-            sender: nil,
             prevent_hijacking?: true,
             registration_enabled?: false,
+            request_action_name: nil,
+            require_interaction?: false,
+            resource: nil,
+            sender: nil,
             sign_in_action_name: nil,
-            lookup_action_name: nil,
             single_use_token?: true,
-            strategy_module: __MODULE__,
             token_lifetime: {10, :minutes},
             token_param_name: :token
 
@@ -127,16 +141,16 @@ defmodule AshAuthentication.Strategy.MagicLink do
 
   @type t :: %__MODULE__{
           identity_field: atom,
+          lookup_action_name: nil,
           name: atom,
           prevent_hijacking?: boolean,
           registration_enabled?: boolean,
           request_action_name: atom,
+          require_interaction?: boolean,
           resource: module,
           sender: {module, keyword},
-          lookup_action_name: nil,
-          single_use_token?: boolean,
           sign_in_action_name: atom,
-          strategy_module: module,
+          single_use_token?: boolean,
           token_lifetime: pos_integer(),
           token_param_name: atom
         }
@@ -149,8 +163,9 @@ defmodule AshAuthentication.Strategy.MagicLink do
 
   Used by `AshAuthentication.Strategy.MagicLink.RequestPreparation`.
   """
-  @spec request_token_for(t, Resource.record()) :: {:ok, binary} | :error
-  def request_token_for(strategy, user)
+  @spec request_token_for(t, Resource.record(), opts :: Keyword.t(), context :: map()) ::
+          {:ok, binary} | :error
+  def request_token_for(strategy, user, opts \\ [], context \\ %{})
       when is_struct(strategy, __MODULE__) and is_struct(user, strategy.resource) do
     case Jwt.token_for_user(
            user,
@@ -158,8 +173,11 @@ defmodule AshAuthentication.Strategy.MagicLink do
              "act" => strategy.sign_in_action_name,
              "identity" => Map.get(user, strategy.identity_field)
            },
-           token_lifetime: strategy.token_lifetime,
-           purpose: :magic_link
+           Keyword.merge(opts,
+             token_lifetime: strategy.token_lifetime,
+             purpose: :magic_link
+           ),
+           context
          ) do
       {:ok, token, _claims} -> {:ok, token}
       :error -> :error
@@ -171,7 +189,7 @@ defmodule AshAuthentication.Strategy.MagicLink do
 
   Used by `AshAuthentication.Strategy.MagicLink.RequestPreparation`.
   """
-  def request_token_for_identity(strategy, identity)
+  def request_token_for_identity(strategy, identity, opts \\ [], context \\ %{})
       when is_struct(strategy, __MODULE__) do
     case Jwt.token_for_resource(
            strategy.resource,
@@ -179,8 +197,8 @@ defmodule AshAuthentication.Strategy.MagicLink do
              "act" => strategy.sign_in_action_name,
              "identity" => to_string(identity)
            },
-           token_lifetime: strategy.token_lifetime,
-           purpose: :magic_link
+           Keyword.merge(opts, token_lifetime: strategy.token_lifetime, purpose: :magic_link),
+           context
          ) do
       {:ok, token, _claims} -> {:ok, token}
       :error -> :error

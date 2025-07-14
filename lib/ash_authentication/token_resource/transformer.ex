@@ -20,7 +20,6 @@ defmodule AshAuthentication.TokenResource.Transformer do
   @doc false
   @impl true
   @spec after?(any) :: boolean()
-  def after?(Resource.Transformers.ValidatePrimaryActions), do: true
   def after?(_), do: false
 
   @doc false
@@ -46,12 +45,17 @@ defmodule AshAuthentication.TokenResource.Transformer do
            ),
          :ok <- validate_jti_field(dsl_state),
          {:ok, dsl_state} <-
-           maybe_build_attribute(dsl_state, :subject, :string, allow_nil?: false, writable?: true),
+           maybe_build_attribute(dsl_state, :subject, :string,
+             allow_nil?: false,
+             writable?: true,
+             public?: true
+           ),
          :ok <- validate_subject_field(dsl_state),
          {:ok, dsl_state} <-
            maybe_build_attribute(dsl_state, :expires_at, :utc_datetime,
              allow_nil?: false,
-             writable?: true
+             writable?: true,
+             public?: true
            ),
          :ok <- validate_expires_at_field(dsl_state),
          {:ok, dsl_state} <-
@@ -67,8 +71,11 @@ defmodule AshAuthentication.TokenResource.Transformer do
              writable?: true,
              public?: true
            ),
+         :ok <- validate_extra_data_field(dsl_state),
+         {:ok, created_at} <-
+           TokenResource.Info.token_created_at_attribute_name(dsl_state),
          {:ok, dsl_state} <-
-           maybe_build_attribute(dsl_state, :created_at, :utc_datetime_usec,
+           maybe_build_attribute(dsl_state, created_at, :utc_datetime_usec,
              allow_nil?: false,
              public?: false,
              default: &DateTime.utc_now/0
@@ -80,7 +87,6 @@ defmodule AshAuthentication.TokenResource.Transformer do
              default: &DateTime.utc_now/0,
              update_default: &DateTime.utc_now/0
            ),
-         :ok <- validate_extra_data_field(dsl_state),
          {:ok, expunge_expired_action_name} <- Info.token_expunge_expired_action_name(dsl_state),
          {:ok, dsl_state} <-
            maybe_build_action(
@@ -106,6 +112,31 @@ defmodule AshAuthentication.TokenResource.Transformer do
              &build_revoke_token_action(&1, revoke_token_action_name)
            ),
          :ok <- validate_revoke_token_action(dsl_state, revoke_token_action_name),
+         {:ok, revoke_jti_action_name} <-
+           Info.token_revocation_revoke_jti_action_name(dsl_state),
+         {:ok, dsl_state} <-
+           maybe_build_action(
+             dsl_state,
+             revoke_jti_action_name,
+             &build_revoke_jti_action(&1, revoke_jti_action_name)
+           ),
+         :ok <- validate_revoke_jti_action(dsl_state, revoke_jti_action_name),
+         {:ok, revoke_all_stored_for_subject_action_name} <-
+           Info.token_revocation_revoke_all_stored_for_subject_action_name(dsl_state),
+         {:ok, dsl_state} <-
+           maybe_build_action(
+             dsl_state,
+             revoke_all_stored_for_subject_action_name,
+             &build_revoke_all_stored_for_subject_action(
+               &1,
+               revoke_all_stored_for_subject_action_name
+             )
+           ),
+         :ok <-
+           validate_revoke_all_stored_for_subject_action(
+             dsl_state,
+             revoke_all_stored_for_subject_action_name
+           ),
          {:ok, is_revoked_action_name} <- Info.token_revocation_is_revoked_action_name(dsl_state),
          {:ok, dsl_state} <-
            maybe_build_action(
@@ -156,8 +187,71 @@ defmodule AshAuthentication.TokenResource.Transformer do
              get_token_action_name,
              &build_get_token_action(&1, get_token_action_name)
            ),
-         :ok <- validate_get_token_action(dsl_state, get_token_action_name) do
+         :ok <- validate_get_token_action(dsl_state, get_token_action_name),
+         :ok <- validate_primary_key(dsl_state) do
       {:ok, dsl_state}
+    end
+  end
+
+  defp validate_primary_key(dsl_state) do
+    dsl_state
+    |> Ash.Resource.Info.attributes()
+    |> Enum.filter(& &1.primary_key?)
+    |> Enum.map(& &1.name)
+    |> case do
+      [:jti] ->
+        :ok
+
+      fields ->
+        module = Transformer.get_persisted(dsl_state, :module)
+
+        {:error,
+         DslError.exception(
+           module: module,
+           path: [:primary_key],
+           message: """
+           The token resource must only have `:jti` as a primary key attribute.
+           Found: #{inspect(fields)}
+
+           You are likely seeing this as a by-product of an error with the generators
+           that added a `uuid_primary_key :id` to the token resource.
+
+           This is **not a security issue**, because previous versions of AshAuthentication
+           checked for revocation tokens as a separate check. In the future, however,
+           we will not perform this check, which means that all tokens must be guaranteed
+           to be unique on `jti`.
+
+           To address this:
+
+           1. Make sure that you are on `ash_postgres` >= 2.5.6`
+           2. remove `uuid_primary_key :id` from `#{inspect(module)}`
+           3. run `mix ash.codegen remove_id_from_tokens`
+           4. Add the following code to the *top* of the `up` function in the generated migration.
+
+               execute(\"""
+               WITH duplicate_tokens AS (
+                   SELECT jti
+                   FROM tokens
+                   GROUP BY jti
+                   HAVING COUNT(*) > 1
+               ),
+               revocation_tokens AS (
+                   SELECT DISTINCT ON (t.jti) t.id
+                   FROM tokens t
+                   JOIN duplicate_tokens d ON t.jti = d.jti
+                   WHERE t.purpose = 'revocation'
+               ),
+               other_tokens AS (
+                   SELECT t.*
+                   FROM tokens t
+                   JOIN duplicate_tokens d ON t.jti = d.jti
+                   WHERE t.id NOT IN (SELECT id FROM revocation_tokens)
+               )
+               DELETE FROM tokens
+               WHERE id IN (SELECT id FROM other_tokens);
+               \""")
+           """
+         )}
     end
   end
 
@@ -393,11 +487,27 @@ defmodule AshAuthentication.TokenResource.Transformer do
     )
   end
 
+  defp validate_subject_argument(action) do
+    with :ok <-
+           validate_action_argument_option(action, :subject, :type, [Ash.Type.String, :string]),
+         :ok <- validate_action_argument_option(action, :subject, :allow_nil?, [false]) do
+      validate_action_argument_option(action, :subject, :sensitive?, [true])
+    end
+  end
+
   defp validate_token_argument(action) do
     with :ok <-
            validate_action_argument_option(action, :token, :type, [Ash.Type.String, :string]),
          :ok <- validate_action_argument_option(action, :token, :allow_nil?, [false]) do
       validate_action_argument_option(action, :token, :sensitive?, [true])
+    end
+  end
+
+  defp validate_jti_argument(action) do
+    with :ok <-
+           validate_action_argument_option(action, :jti, :type, [Ash.Type.String, :string]),
+         :ok <- validate_action_argument_option(action, :jti, :allow_nil?, [false]) do
+      validate_action_argument_option(action, :jti, :sensitive?, [true])
     end
   end
 
@@ -425,6 +535,81 @@ defmodule AshAuthentication.TokenResource.Transformer do
     ]
 
     Transformer.build_entity(Resource.Dsl, [:actions], :create,
+      name: action_name,
+      arguments: arguments,
+      changes: changes,
+      upsert?: true,
+      accept: [:extra_data]
+    )
+  end
+
+  defp validate_revoke_jti_action(dsl_state, revoke_jti_action_name) do
+    with {:ok, action} <- validate_action_exists(dsl_state, revoke_jti_action_name),
+         :ok <- validate_jti_argument(action),
+         :ok <- validate_subject_argument(action) do
+      validate_action_has_change(action, TokenResource.RevokeJtiChange)
+    end
+  end
+
+  defp build_revoke_jti_action(_dsl_state, action_name) do
+    arguments = [
+      Transformer.build_entity!(Resource.Dsl, [:actions, :create], :argument,
+        name: :jti,
+        type: :string,
+        allow_nil?: false,
+        sensitive?: true
+      ),
+      Transformer.build_entity!(Resource.Dsl, [:actions, :create], :argument,
+        name: :subject,
+        type: :string,
+        allow_nil?: false,
+        sensitive?: true
+      )
+    ]
+
+    changes = [
+      Transformer.build_entity!(Resource.Dsl, [:actions, :create], :change,
+        change: TokenResource.RevokeJtiChange
+      )
+    ]
+
+    Transformer.build_entity(Resource.Dsl, [:actions], :create,
+      name: action_name,
+      arguments: arguments,
+      changes: changes,
+      upsert?: true,
+      accept: [:extra_data]
+    )
+  end
+
+  defp validate_revoke_all_stored_for_subject_action(
+         dsl_state,
+         revoke_all_stored_for_subject_action_name
+       ) do
+    with {:ok, action} <-
+           validate_action_exists(dsl_state, revoke_all_stored_for_subject_action_name),
+         :ok <- validate_subject_argument(action) do
+      validate_action_has_change(action, TokenResource.RevokeAllStoredForSubjectChange)
+    end
+  end
+
+  defp build_revoke_all_stored_for_subject_action(_dsl_state, action_name) do
+    arguments = [
+      Transformer.build_entity!(Resource.Dsl, [:actions, :update], :argument,
+        name: :subject,
+        type: :string,
+        allow_nil?: false,
+        sensitive?: true
+      )
+    ]
+
+    changes = [
+      Transformer.build_entity!(Resource.Dsl, [:actions, :create], :change,
+        change: TokenResource.RevokeAllStoredForSubjectChange
+      )
+    ]
+
+    Transformer.build_entity(Resource.Dsl, [:actions], :update,
       name: action_name,
       arguments: arguments,
       changes: changes,
@@ -468,8 +653,6 @@ defmodule AshAuthentication.TokenResource.Transformer do
   defp validate_expires_at_field(dsl_state) do
     with {:ok, resource} <- persisted_option(dsl_state, :module),
          {:ok, attribute} <- find_attribute(dsl_state, :expires_at),
-         :ok <-
-           validate_attribute_option(attribute, resource, :type, [Type.UtcDatetime, :utc_datetime]),
          :ok <- validate_attribute_option(attribute, resource, :allow_nil?, [false]) do
       validate_attribute_option(attribute, resource, :writable?, [true])
     end

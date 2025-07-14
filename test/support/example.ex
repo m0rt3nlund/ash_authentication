@@ -6,8 +6,10 @@ defmodule Example do
     resource Example.User
     resource Example.UserWithTokenRequired
     resource Example.Token
+    resource Example.TokenWithCustomCreateTimestamp
     resource Example.UserIdentity
     resource Example.UserWithRegisterMagicLink
+    resource Example.ApiKey
   end
 
   json_api do

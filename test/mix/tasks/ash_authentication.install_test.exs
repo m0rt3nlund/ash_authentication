@@ -4,6 +4,8 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
 
   import Igniter.Test
 
+  @moduletag :igniter
+
   setup do
     igniter =
       test_project()
@@ -14,13 +16,22 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
     [igniter: igniter]
   end
 
+  test "installation is idempotent" do
+    test_project()
+    |> Igniter.Project.Deps.add_dep({:simple_sat, ">= 0.0.0"})
+    |> Igniter.compose_task("ash_authentication.install", ["--yes"])
+    |> apply_igniter!()
+    |> Igniter.compose_task("ash_authentication.install", ["--yes"])
+    |> assert_unchanged()
+  end
+
   test "installation creates a secrets module", %{igniter: igniter} do
     igniter
     |> assert_creates("lib/test/secrets.ex", """
     defmodule Test.Secrets do
       use AshAuthentication.Secret
 
-      def secret_for([:authentication, :tokens, :signing_secret], Test.Accounts.User, _opts) do
+      def secret_for([:authentication, :tokens, :signing_secret], Test.Accounts.User, _opts, _context) do
         Application.fetch_env(:test, :token_signing_secret)
       end
     end
@@ -67,9 +78,14 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
       use Ash.Resource,
         otp_app: :test,
         domain: Test.Accounts,
+        data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
-        extensions: [AshAuthentication],
-        data_layer: AshPostgres.DataLayer
+        extensions: [AshAuthentication]
+
+      postgres do
+        table("users")
+        repo(Test.Repo)
+      end
 
       policies do
         bypass AshAuthentication.Checks.AshAuthenticationInteraction do
@@ -82,17 +98,19 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
       end
 
       authentication do
+        add_ons do
+          log_out_everywhere do
+            apply_on_password_change?(true)
+          end
+        end
+
         tokens do
           enabled?(true)
           token_resource(Test.Accounts.Token)
           signing_secret(Test.Secrets)
           store_all_tokens?(true)
+          require_token_presence_for_authentication?(true)
         end
-      end
-
-      postgres do
-        table("users")
-        repo(Test.Repo)
       end
 
       attributes do
@@ -120,9 +138,14 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
       use Ash.Resource,
         otp_app: :test,
         domain: Test.Accounts,
+        data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
-        extensions: [AshAuthentication.TokenResource],
-        data_layer: AshPostgres.DataLayer
+        extensions: [AshAuthentication.TokenResource]
+
+      postgres do
+        table("tokens")
+        repo(Test.Repo)
+      end
 
       policies do
         bypass AshAuthentication.Checks.AshAuthenticationInteraction do
@@ -136,14 +159,7 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
         end
       end
 
-      postgres do
-        table("tokens")
-        repo(Test.Repo)
-      end
-
       attributes do
-        uuid_primary_key(:id)
-
         attribute :jti, :string do
           primary_key?(true)
           public?(true)
@@ -153,10 +169,12 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
 
         attribute :subject, :string do
           allow_nil?(false)
+          public?(true)
         end
 
         attribute :expires_at, :utc_datetime do
           allow_nil?(false)
+          public?(true)
         end
 
         attribute :purpose, :string do
@@ -168,7 +186,8 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
           public?(true)
         end
 
-        timestamps()
+        create_timestamp(:created_at)
+        update_timestamp(:updated_at)
       end
 
       actions do
@@ -189,10 +208,10 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
           prepare(AshAuthentication.TokenResource.GetTokenPreparation)
         end
 
-        action :revoked? do
+        action :revoked?, :boolean do
           description("Returns true if a revocation token is found for the provided token")
-          argument(:token, :string, sensitive?: true, allow_nil?: false)
-          argument(:jti, :string, sensitive?: true, allow_nil?: false)
+          argument(:token, :string, sensitive?: true)
+          argument(:jti, :string, sensitive?: true)
 
           run(AshAuthentication.TokenResource.IsRevoked)
         end
@@ -208,6 +227,18 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
           change(AshAuthentication.TokenResource.RevokeTokenChange)
         end
 
+        create :revoke_jti do
+          description(
+            "Revoke a token by JTI. Creates a revocation token corresponding to the provided jti."
+          )
+
+          accept([:extra_data])
+          argument(:subject, :string, allow_nil?: false, sensitive?: true)
+          argument(:jti, :string, allow_nil?: false, sensitive?: true)
+
+          change(AshAuthentication.TokenResource.RevokeJtiChange)
+        end
+
         create :store_token do
           description("Stores a token used for the provided purpose.")
           accept([:extra_data, :purpose])
@@ -218,6 +249,13 @@ defmodule Mix.Tasks.AshAuthentication.InstallTest do
         destroy :expunge_expired do
           description("Deletes expired tokens.")
           change(filter(expr(expires_at < now())))
+        end
+
+        update :revoke_all_stored_for_subject do
+          description("Revokes all stored tokens for a specific subject.")
+          accept([:extra_data])
+          argument(:subject, :string, allow_nil?: false, sensitive?: true)
+          change(AshAuthentication.TokenResource.RevokeAllStoredForSubjectChange)
         end
       end
     end
